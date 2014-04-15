@@ -71,6 +71,11 @@ else
 # Non-Linux ports also lack *_CLOEXEC and epoll, so wayland isn't ready yet:
 	EGL_DISPLAYS += wayland
 
+# Build freedreno on ARM/Linux platforms
+    ifneq (,$(filter $(DEB_HOST_ARCH),armef armhf))
+	GALLIUM_DRIVERS += freedreno
+    endif
+
     ifeq (,$(filter $(DEB_HOST_ARCH), s390 s390x))
 	DRI_DRIVERS += nouveau
     endif
