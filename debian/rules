@@ -71,6 +71,11 @@ else
 # Non-Linux ports also lack *_CLOEXEC and epoll, so wayland isn't ready yet:
 	EGL_DISPLAYS += wayland
 
+# Build freedreno on ARM/Linux platforms
+    ifneq (,$(filter $(DEB_HOST_ARCH),armef armhf))
+	GALLIUM_DRIVERS += freedreno
+    endif
+
 # Mir isn't built on AArch64 and PPC
     ifeq (,$(filter $(DEB_HOST_ARCH),arm64 powerpc ppc64 ppc64el))
 	EGL_DISPLAYS += mir

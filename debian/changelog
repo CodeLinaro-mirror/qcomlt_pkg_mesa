@@ -1,3 +1,9 @@
+mesa (10.1.0-4ubuntu5linaro1) trusty; urgency=medium
+
+  * Enable freedreno gallium driver for ARM/Linux platforms
+
+ -- Nicolas Dechesne <nicolas.dechesne@linaro.org>  Fri, 25 Apr 2014 08:53:04 +0000
+
 mesa (10.1.0-4ubuntu5) trusty; urgency=medium
 
   * enable-bdw.diff: Enable Broadwell support. (LP: #1300258)
