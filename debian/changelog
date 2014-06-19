@@ -1,14 +1,10 @@
-mesa (10.3.0~git20140618.88b887fa-0ubuntu0ricotz~trusty) trusty; urgency=medium
+mesa (10.2.1-0ubuntu0~linaro1) trusty; urgency=medium
 
-  * Checkout from git 20140618 (master branch) up to commit
-    88b887faa9209a58d29c819e01f9ad37ebc99a36
-  * Only added debian/ tree from origin/ubuntu+1
-  * hook: Drop MIR support.
-  * hook: Drop 02_gbm_no_undefined.diff (upstream)
-  * hook: Drop egl-platform-mir.patch (fails)
-  * hook: update symbols.
+  * Checkout 10.2.1 from debian-experimental
+  * Import debian from origin/ubuntu+1
+  * Enable freedreno
 
- -- Rico Tzschichholz <ricotz@ubuntu.com>  Wed, 18 Jun 2014 08:11:21 +0200
+ -- Nicolas Dechesne <nicolas.dechesne@linaro.org>  Thu, 19 Jun 2014 14:08:06 +0000
 
 mesa (10.2.0~git20140319-0ubuntu1) UNRELEASED; urgency=medium
 
