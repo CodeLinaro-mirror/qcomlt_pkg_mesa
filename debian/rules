@@ -40,13 +40,7 @@ buildflags-i686 = \
 include debian/not-installed
 
 # build the following configurations by default
-CONFIGS = swx11 \
-	  swx11-static \
-	  dri
-
-ifeq ($(DEB_HOST_ARCH_CPU), i386)
-	CONFIGS += swx11-i386-i686
-endif
+CONFIGS = dri
 
 STAMP_DIR = debian/stamp
 STAMP = $(STAMP_DIR)/$(DEB_BUILD_GNU_TYPE)
@@ -64,20 +58,19 @@ confflags_DRI3 = --disable-dri3
 # hurd doesn't do direct rendering
 ifeq ($(DEB_HOST_ARCH_OS), hurd)
 	confflags_DIRECT_RENDERING = --disable-driglx-direct
-	DRI_DRIVERS = swrast
+	DRI_DRIVERS += swrast
 else
   ifeq ($(DEB_HOST_ARCH_OS), linux)
-	confflags_DRI3 = --enable-dri3
+	confflags_DRI3 = --disable-dri3
 # Gallium drivers require libdrm-{nouveau,radeon}, only available on Linux
 	GALLIUM_DRIVERS += nouveau svga
-	# svga needs xa state tracker
-	confflags_GALLIUM += --enable-xa
 #
 # Although the KMS egl drivers will probably build on kfreebsd & hurd
 # only linux actually has KMS drivers implemented at this point.
 	EGL_DISPLAYS += drm
 # Non-Linux ports also lack *_CLOEXEC and epoll, so wayland isn't ready yet:
 	EGL_DISPLAYS += wayland
+
     ifeq (,$(filter $(DEB_HOST_ARCH), s390 s390x))
 	DRI_DRIVERS += nouveau
     endif
@@ -99,18 +92,12 @@ else
     DRI_DRIVERS += r200 radeon
     GALLIUM_DRIVERS += r600 r300
   endif
-  ifneq (,$(filter $(DEB_HOST_ARCH),amd64 i386 armhf))
-	# opencl needs gallium-pipe-loader which needs udev,
-	# so no opencl on kfreebsd.
-	# opencl needs LLVM and Clang, so only build it on the subset
-	# of arches where we have LLVM enabled.
-	confflags_GALLIUM += --enable-opencl --enable-opencl-icd
-  endif
 
   # LLVM is required for r300g, radeonsi and llvmpipe:
   ifneq (,$(filter $(DEB_HOST_ARCH),amd64 i386 kfreebsd-amd64 kfreebsd-i386 armhf))
 	GALLIUM_DRIVERS += radeonsi
 	confflags_GALLIUM += --enable-gallium-llvm
+	confflags_GALLIUM += --with-llvm-shared-libs
   endif
 
 	confflags_DIRECT_RENDERING = --enable-driglx-direct
@@ -130,6 +117,7 @@ confflags-dri = \
 	--enable-glx-tls \
 	--enable-shared-glapi \
 	--enable-texture-float \
+	--enable-xa \
 	--disable-xvmc \
 	$(confflags_DIRECT_RENDERING) \
 	$(confflags_DRI3) \
@@ -138,37 +126,6 @@ confflags-dri = \
 	$(confflags_GLES) \
 	$(confflags_OPENVG) \
 	$(buildflags)
-
-confflags-swx11 = \
-	--disable-dri \
-	--disable-egl \
-	--with-gallium-drivers= \
-	--enable-xlib-glx \
-	--disable-egl \
-	--disable-shared-glapi \
-	$(buildflags)
-
-confflags-swx11-static = \
-	--disable-dri \
-	--disable-egl \
-	--with-gallium-drivers= \
-	--enable-xlib-glx \
-	--enable-static \
-	--disable-egl \
-	--disable-shared-glapi \
-	$(buildflags)
-
-confflags-swx11-i386-i686 = \
-	--disable-dri \
-	--disable-egl \
-	--with-gallium-drivers= \
-	--enable-xlib-glx \
-	--disable-egl \
-	--disable-shared-glapi \
-	--libdir=/usr/lib/$(DEB_HOST_MULTIARCH)/i686/cmov \
-	$(buildflags-i686)
-
-confflags += --disable-omx
 
 configure: $(QUILT_STAMPFN) configure.ac
 	autoreconf -vfi
@@ -267,7 +224,7 @@ binary-arch: install
 	# Files only in git, not in tarballs, OK to use rm -f here:
 	set -e; for file in $(NOT_INSTALLED_EITHER); do rm -f debian/tmp/$$file; done
 	# No need for these .so, they're just convenience libraries:
-	rm debian/tmp/dri/usr/lib/${DEB_HOST_MULTIARCH}/libglapi.so
+	rm -f debian/tmp/dri/usr/lib/${DEB_HOST_MULTIARCH}/libgallium*.so
 	# purge .la files
 	find debian/tmp/ -name '*.la' -exec rm '{}' ';'
 
@@ -275,7 +232,20 @@ binary-arch: install
 	install -m755 -d debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
 	mv debian/tmp/dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/*_dri.so \
 	   debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
-	dh_install -s --fail-missing
+	dh_install -s --list-missing
+
+	# Create an ld.so.conf which says where to find libGL from Mesa
+	echo "/usr/lib/$(DEB_HOST_MULTIARCH)/mesa" \
+	> $(CURDIR)/debian/libgl1-mesa-glx/usr/lib/$(DEB_HOST_MULTIARCH)/mesa/ld.so.conf
+
+	# Empty directory for the alternative
+	mkdir -p $(CURDIR)/debian/libgl1-mesa-glx/usr/lib/$(DEB_HOST_MULTIARCH)/xorg/x11-extra-modules
+
+	# Create an ld.so.conf which says where to find libEGL, libGLES{1,2}
+	# and libOpenVG from Mesa.
+	echo "/usr/lib/$(DEB_HOST_MULTIARCH)/mesa-egl" \
+	> $(CURDIR)/debian/libegl1-mesa/usr/lib/$(DEB_HOST_MULTIARCH)/mesa-egl/ld.so.conf
+
 	dh_installman -s
 	dh_lintian -s
 	dh_link -s
@@ -293,9 +263,19 @@ binary-arch: install
 	dh_strip $(foreach p,$(nodbgpkg),-p$(p))
 	dh_compress -s
 	dh_fixperms -s
-	dh_makeshlibs -s -- -c4
+	# Resolve EGL/GLES/OpenVG symbols in the private library path.
+	# Because there's no packaging problem so onerous that accomodating
+	# proprietary alternatives can't make more difficult…
+	set -e ; for PACKAGE in \
+		libegl1-mesa libgles1-mesa libgles2-mesa libopenvg1-mesa; do \
+			dh_makeshlibs -p$$PACKAGE -- -c1 \
+			-edebian/$$PACKAGE/usr/lib/$(DEB_HOST_MULTIARCH)/mesa-egl/\* \
+		; done
+	dh_makeshlibs -s --remaining-packages -- -c1
+
 	dh_installdeb -s
-	dh_shlibdeps -s
+	dh_shlibdeps -s -l/usr/lib/$(DEB_HOST_MULTIARCH)/mesa:\
+/usr/lib/$(DEB_HOST_MULTIARCH)/mesa-egl
 	dh_gencontrol -s
 	dh_md5sums -s
 	dh_builddeb -s -- -Zxz

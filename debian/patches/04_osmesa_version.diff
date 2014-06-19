@@ -1,0 +1,22 @@
+--- a/src/gallium/targets/osmesa/Makefile.am
++++ b/src/gallium/targets/osmesa/Makefile.am
+@@ -38,7 +38,7 @@
+ lib@OSMESA_LIB@_la_LDFLAGS = \
+ 	-module \
+ 	-no-undefined \
+-	-version-number @OSMESA_VERSION@ \
++	-version-number 6:5:3 \
+ 	$(GC_SECTIONS) \
+ 	$(LD_NO_UNDEFINED)
+ 
+--- a/src/mesa/drivers/osmesa/Makefile.am
++++ b/src/mesa/drivers/osmesa/Makefile.am
+@@ -35,7 +35,7 @@
+ lib@OSMESA_LIB@_la_LDFLAGS = \
+ 	-module \
+ 	-no-undefined \
+-	-version-number @OSMESA_VERSION@ \
++	-version-number 6:5:3 \
+ 	$(GC_SECTIONS) \
+ 	$(LD_NO_UNDEFINED)
+ 

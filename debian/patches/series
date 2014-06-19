@@ -1,2 +1,11 @@
-01_targets-xa-limit-the-amount-of-exported-symbols.diff
+#02_gbm_no_undefined.diff
+04_osmesa_version.diff
 07_gallium-fix-build-failure-on-powerpcspe.diff
+
+# Ubuntu patches.
+101_ubuntu_hidden_glname.patch
+117-static-gallium.patch
+#118-dricore-gallium.patch
+120-hide-x86sse.patch
+#egl-platform-mir.patch
+i915-dont-default-to-2.1.patch
