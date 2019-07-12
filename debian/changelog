@@ -1,3 +1,9 @@
+mesa (19.1.1-1+linaro1) experimental; urgency=medium
+
+  * Downgrade dependencies to build on debian buster llvm8 -> llvm7, libclc.
+
+ -- Anibal Limon <anibal.limon@linaro.org>  Fri, 12 Jul 2019 16:01:28 -0500
+
 mesa (19.1.1-1) experimental; urgency=medium
 
   * New upstream bugfix release.
