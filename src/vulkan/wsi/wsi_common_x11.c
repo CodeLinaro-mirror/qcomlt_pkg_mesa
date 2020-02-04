@@ -38,6 +38,7 @@
 #include <xf86drm.h>
 #include "drm-uapi/drm_fourcc.h"
 #include "util/hash_table.h"
+#include "util/xmlconfig.h"
 
 #include "vk_util.h"
 #include "wsi_common_private.h"
@@ -511,6 +512,9 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
    /* There is no real maximum */
    caps->maxImageCount = 0;
 
+   if (wsi_device->x11.override_minImageCount)
+      caps->minImageCount = wsi_device->x11.override_minImageCount;
+
    caps->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
    caps->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
    caps->maxImageArrayLayers = 1;
@@ -974,6 +978,19 @@ x11_present_to_x11(struct x11_swapchain *chain, uint32_t image_index,
       options |= XCB_PRESENT_OPTION_SUBOPTIMAL;
 #endif
 
+   /* Poll for any available event and update the swapchain status. This could
+    * update the status of the swapchain to SUBOPTIMAL or OUT_OF_DATE if the
+    * associated X11 surface has been resized.
+    */
+   xcb_generic_event_t *event;
+   while ((event = xcb_poll_for_special_event(chain->conn, chain->special_event))) {
+      VkResult result = x11_handle_dri3_present_event(chain, (void *)event);
+      free(event);
+      if (result < 0)
+         return x11_swapchain_result(chain, result);
+      x11_swapchain_result(chain, result);
+   }
+
    xshmfence_reset(image->shm_fence);
 
    ++chain->send_sbc;
@@ -1009,6 +1026,10 @@ x11_acquire_next_image(struct wsi_swapchain *anv_chain,
    struct x11_swapchain *chain = (struct x11_swapchain *)anv_chain;
    uint64_t timeout = info->timeout;
 
+   /* If the swapchain is in an error state, don't go any further. */
+   if (chain->status < 0)
+      return chain->status;
+
    if (chain->threaded) {
       return x11_acquire_next_image_from_queue(chain, image_index, timeout);
    } else {
@@ -1022,6 +1043,10 @@ x11_queue_present(struct wsi_swapchain *anv_chain,
                   const VkPresentRegionKHR *damage)
 {
    struct x11_swapchain *chain = (struct x11_swapchain *)anv_chain;
+
+   /* If the swapchain is in an error state, don't go any further. */
+   if (chain->status < 0)
+      return chain->status;
 
    if (chain->threaded) {
       wsi_queue_push(&chain->present_queue, image_index);
@@ -1525,7 +1550,8 @@ fail_alloc:
 
 VkResult
 wsi_x11_init_wsi(struct wsi_device *wsi_device,
-                 const VkAllocationCallbacks *alloc)
+                 const VkAllocationCallbacks *alloc,
+                 const struct driOptionCache *dri_options)
 {
    struct wsi_x11 *wsi;
    VkResult result;
@@ -1554,6 +1580,13 @@ wsi_x11_init_wsi(struct wsi_device *wsi_device,
    if (!wsi->connections) {
       result = VK_ERROR_OUT_OF_HOST_MEMORY;
       goto fail_mutex;
+   }
+
+   if (dri_options) {
+      if (driCheckOption(dri_options, "vk_x11_override_min_image_count", DRI_INT)) {
+         wsi_device->x11.override_minImageCount =
+            driQueryOptioni(dri_options, "vk_x11_override_min_image_count");
+      }
    }
 
    wsi->base.get_support = x11_surface_get_support;

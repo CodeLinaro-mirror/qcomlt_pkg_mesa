@@ -518,6 +518,14 @@ radv_handle_per_app_options(struct radv_instance *instance,
 		 */
 		if (HAVE_LLVM < 0x900)
 			instance->debug_flags |= RADV_DEBUG_NO_LOAD_STORE_OPT;
+	} else if (!strcmp(name, "Fledge")) {
+		/*
+		 * Zero VRAM for "The Surge 2"
+		 *
+		 * This avoid a hang when when rendering any level. Likely
+		 * uninitialized data in an indirect draw.
+		 */
+		instance->debug_flags |= RADV_DEBUG_ZERO_VRAM;
 	}
 }
 
@@ -532,8 +540,9 @@ static int radv_get_instance_extension_index(const char *name)
 
 static const char radv_dri_options_xml[] =
 DRI_CONF_BEGIN
-	DRI_CONF_SECTION_QUALITY
+	DRI_CONF_SECTION_PERFORMANCE
 		DRI_CONF_ADAPTIVE_SYNC("true")
+		DRI_CONF_VK_X11_OVERRIDE_MIN_IMAGE_COUNT(0)
 	DRI_CONF_SECTION_END
 DRI_CONF_END;
 

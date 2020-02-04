@@ -1011,15 +1011,37 @@ fs_inst::size_read(int arg) const
 }
 
 namespace {
+   unsigned
+   predicate_width(brw_predicate predicate)
+   {
+      switch (predicate) {
+      case BRW_PREDICATE_NONE:            return 1;
+      case BRW_PREDICATE_NORMAL:          return 1;
+      case BRW_PREDICATE_ALIGN1_ANY2H:    return 2;
+      case BRW_PREDICATE_ALIGN1_ALL2H:    return 2;
+      case BRW_PREDICATE_ALIGN1_ANY4H:    return 4;
+      case BRW_PREDICATE_ALIGN1_ALL4H:    return 4;
+      case BRW_PREDICATE_ALIGN1_ANY8H:    return 8;
+      case BRW_PREDICATE_ALIGN1_ALL8H:    return 8;
+      case BRW_PREDICATE_ALIGN1_ANY16H:   return 16;
+      case BRW_PREDICATE_ALIGN1_ALL16H:   return 16;
+      case BRW_PREDICATE_ALIGN1_ANY32H:   return 32;
+      case BRW_PREDICATE_ALIGN1_ALL32H:   return 32;
+      default: unreachable("Unsupported predicate");
+      }
+   }
+
    /* Return the subset of flag registers that an instruction could
     * potentially read or write based on the execution controls and flag
     * subregister number of the instruction.
     */
    unsigned
-   flag_mask(const fs_inst *inst)
+   flag_mask(const fs_inst *inst, unsigned width)
    {
-      const unsigned start = inst->flag_subreg * 16 + inst->group;
-      const unsigned end = start + inst->exec_size;
+      assert(util_is_power_of_two_nonzero(width));
+      const unsigned start = (inst->flag_subreg * 16 + inst->group) &
+                             ~(width - 1);
+      const unsigned end = start + ALIGN(inst->exec_size, width);
       return ((1 << DIV_ROUND_UP(end, 8)) - 1) & ~((1 << (start / 8)) - 1);
    }
 
@@ -1051,9 +1073,9 @@ fs_inst::flags_read(const gen_device_info *devinfo) const
        * f0.0 and f1.0 on Gen7+, and f0.0 and f0.1 on older hardware.
        */
       const unsigned shift = devinfo->gen >= 7 ? 4 : 2;
-      return flag_mask(this) << shift | flag_mask(this);
+      return flag_mask(this, 1) << shift | flag_mask(this, 1);
    } else if (predicate) {
-      return flag_mask(this);
+      return flag_mask(this, predicate_width(predicate));
    } else {
       unsigned mask = 0;
       for (int i = 0; i < sources; i++) {
@@ -1072,7 +1094,7 @@ fs_inst::flags_written() const
                             opcode != BRW_OPCODE_WHILE)) ||
        opcode == SHADER_OPCODE_FIND_LIVE_CHANNEL ||
        opcode == FS_OPCODE_FB_WRITE) {
-      return flag_mask(this);
+      return flag_mask(this, 1);
    } else {
       return flag_mask(dst, size_written);
    }
@@ -1890,8 +1912,8 @@ fs_visitor::split_virtual_grfs()
     * destination), we mark the used slots as inseparable.  Then we go
     * through and split the registers into the smallest pieces we can.
     */
-   bool split_points[reg_count];
-   memset(split_points, 0, sizeof(split_points));
+   bool *split_points = new bool[reg_count];
+   memset(split_points, 0, reg_count * sizeof(*split_points));
 
    /* Mark all used registers as fully splittable */
    foreach_block_and_inst(block, fs_inst, inst, cfg) {
@@ -1925,8 +1947,8 @@ fs_visitor::split_virtual_grfs()
       }
    }
 
-   int new_virtual_grf[reg_count];
-   int new_reg_offset[reg_count];
+   int *new_virtual_grf = new int[reg_count];
+   int *new_reg_offset = new int[reg_count];
 
    int reg = 0;
    for (int i = 0; i < num_vars; i++) {
@@ -1982,6 +2004,10 @@ fs_visitor::split_virtual_grfs()
       }
    }
    invalidate_live_intervals();
+
+   delete[] split_points;
+   delete[] new_virtual_grf;
+   delete[] new_reg_offset;
 }
 
 /**
@@ -1997,8 +2023,8 @@ bool
 fs_visitor::compact_virtual_grfs()
 {
    bool progress = false;
-   int remap_table[this->alloc.count];
-   memset(remap_table, -1, sizeof(remap_table));
+   int *remap_table = new int[this->alloc.count];
+   memset(remap_table, -1, this->alloc.count * sizeof(int));
 
    /* Mark which virtual GRFs are used. */
    foreach_block_and_inst(block, const fs_inst, inst, cfg) {
@@ -2053,6 +2079,8 @@ fs_visitor::compact_virtual_grfs()
          }
       }
    }
+
+   delete[] remap_table;
 
    return progress;
 }
@@ -6124,9 +6152,6 @@ get_lowered_simd_width(const struct gen_device_info *devinfo,
 
    case FS_OPCODE_LINTERP:
    case SHADER_OPCODE_GET_BUFFER_SIZE:
-   case FS_OPCODE_DDX_COARSE:
-   case FS_OPCODE_DDX_FINE:
-   case FS_OPCODE_DDY_COARSE:
    case FS_OPCODE_UNIFORM_PULL_CONSTANT_LOAD:
    case FS_OPCODE_PACK_HALF_2x16_SPLIT:
    case FS_OPCODE_INTERPOLATE_AT_SAMPLE:
@@ -6143,6 +6168,9 @@ get_lowered_simd_width(const struct gen_device_info *devinfo,
        */
       return (devinfo->gen == 4 ? 16 : MIN2(16, inst->exec_size));
 
+   case FS_OPCODE_DDX_COARSE:
+   case FS_OPCODE_DDX_FINE:
+   case FS_OPCODE_DDY_COARSE:
    case FS_OPCODE_DDY_FINE:
       /* The implementation of this virtual opcode may require emitting
        * compressed Align16 instructions, which are severely limited on some
@@ -8303,7 +8331,7 @@ brw_compile_cs(const struct brw_compiler *compiler, void *log_data,
       if (!v32->run_cs(min_dispatch_width)) {
          compiler->shader_perf_log(log_data,
                                    "SIMD32 shader failed to compile: %s",
-                                   v16->fail_msg);
+                                   v32->fail_msg);
          if (!cfg) {
             fail_msg =
                "Couldn't generate SIMD32 program and not "

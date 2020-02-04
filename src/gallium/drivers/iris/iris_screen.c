@@ -179,6 +179,7 @@ iris_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_TGSI_FS_FACE_IS_INTEGER_SYSVAL:
    case PIPE_CAP_COMPUTE_SHADER_DERIVATIVES:
    case PIPE_CAP_INVALIDATE_BUFFER:
+   case PIPE_CAP_SURFACE_REINTERPRET_BLOCKS:
       return true;
    case PIPE_CAP_CONSERVATIVE_RASTER_INNER_COVERAGE:
    case PIPE_CAP_TGSI_FS_FBFETCH:
@@ -475,6 +476,7 @@ iris_destroy_screen(struct pipe_screen *pscreen)
    iris_bo_unreference(screen->workaround_bo);
    u_transfer_helper_destroy(pscreen->transfer_helper);
    iris_bufmgr_destroy(screen->bufmgr);
+   close(screen->fd);
    ralloc_free(screen);
 }
 

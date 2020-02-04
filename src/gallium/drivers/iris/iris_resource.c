@@ -508,6 +508,28 @@ supports_ccs(const struct gen_device_info *devinfo,
    return true;
 }
 
+static bool
+want_ccs_e_for_format(const struct gen_device_info *devinfo,
+                      enum isl_format format)
+{
+   if (!isl_format_supports_ccs_e(devinfo, format))
+      return false;
+
+   const struct isl_format_layout *fmtl = isl_format_get_layout(format);
+
+   /* CCS_E seems to significantly hurt performance with 32-bit floating
+    * point formats.  For example, Paraview's "Wavelet Volume" case uses
+    * both R32_FLOAT and R32G32B32A32_FLOAT, and enabling CCS_E for those
+    * formats causes a 62% FPS drop.
+    *
+    * However, many benchmarks seem to use 16-bit float with no issues.
+    */
+   if (fmtl->channels.r.bits == 32 && fmtl->channels.r.type == ISL_SFLOAT)
+      return false;
+
+   return true;
+}
+
 static struct pipe_resource *
 iris_resource_create_for_buffer(struct pipe_screen *pscreen,
                                 const struct pipe_resource *templ)
@@ -645,7 +667,7 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
          res->aux.possible_usages |= 1 << ISL_AUX_USAGE_HIZ;
    } else if (likely(!(INTEL_DEBUG & DEBUG_NO_RBC)) &&
               supports_ccs(devinfo, &res->surf)) {
-      if (isl_format_supports_ccs_e(devinfo, res->surf.format))
+      if (want_ccs_e_for_format(devinfo, res->surf.format))
          res->aux.possible_usages |= 1 << ISL_AUX_USAGE_CCS_E;
 
       if (isl_format_supports_ccs_d(devinfo, res->surf.format))
@@ -1003,6 +1025,7 @@ iris_map_copy_region(struct iris_transfer *map)
       .nr_samples = xfer->resource->nr_samples,
       .nr_storage_samples = xfer->resource->nr_storage_samples,
       .array_size = box->depth,
+      .format = res->internal_format,
    };
 
    if (xfer->resource->target == PIPE_BUFFER)
@@ -1011,22 +1034,6 @@ iris_map_copy_region(struct iris_transfer *map)
       templ.target = PIPE_TEXTURE_2D_ARRAY;
    else
       templ.target = PIPE_TEXTURE_2D;
-
-   /* Depth, stencil, and ASTC can't be linear surfaces, so we can't use
-    * xfer->resource->format directly.  Pick a bpb compatible format so
-    * resource creation will succeed; blorp_copy will override it anyway.
-    */
-   switch (util_format_get_blocksizebits(res->internal_format)) {
-   case 8:   templ.format = PIPE_FORMAT_R8_UINT;           break;
-   case 16:  templ.format = PIPE_FORMAT_R8G8_UINT;         break;
-   case 24:  templ.format = PIPE_FORMAT_R8G8B8_UINT;       break;
-   case 32:  templ.format = PIPE_FORMAT_R8G8B8A8_UINT;     break;
-   case 48:  templ.format = PIPE_FORMAT_R16G16B16_UINT;    break;
-   case 64:  templ.format = PIPE_FORMAT_R16G16B16A16_UINT; break;
-   case 96:  templ.format = PIPE_FORMAT_R32G32B32_UINT;    break;
-   case 128: templ.format = PIPE_FORMAT_R32G32B32A32_UINT; break;
-   default: unreachable("Invalid bpb");
-   }
 
    map->staging = iris_resource_create(pscreen, &templ);
    assert(map->staging);
@@ -1442,6 +1449,10 @@ iris_transfer_map(struct pipe_context *ctx,
        res->aux.usage != ISL_AUX_USAGE_CCS_D) {
       no_gpu = true;
    }
+
+   const struct isl_format_layout *fmtl = isl_format_get_layout(surf->format);
+   if (fmtl->txc == ISL_TXC_ASTC)
+      no_gpu = true;
 
    if ((map_would_stall || res->aux.usage == ISL_AUX_USAGE_CCS_E) && !no_gpu) {
       /* If we need a synchronous mapping and the resource is busy,

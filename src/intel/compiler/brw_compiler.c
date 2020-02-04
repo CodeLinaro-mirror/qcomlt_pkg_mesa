@@ -141,7 +141,8 @@ brw_compiler_create(void *mem_ctx, const struct gen_device_info *devinfo)
                        nir_lower_ineg64 |
                        nir_lower_logic64 |
                        nir_lower_minmax64 |
-                       nir_lower_shift64;
+                       nir_lower_shift64 |
+                       nir_lower_extract64;
       fp64_options |= nir_lower_fp64_full_software;
    }
 
@@ -186,6 +187,8 @@ brw_compiler_create(void *mem_ctx, const struct gen_device_info *devinfo)
 
       /* Prior to Gen6, there are no three source operations. */
       nir_options->lower_ffma = devinfo->gen < 6;
+
+      nir_options->lower_bitfield_reverse = devinfo->gen < 7;
 
       nir_options->lower_int64_options = int64_options;
       nir_options->lower_doubles_options = fp64_options;

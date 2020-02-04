@@ -311,6 +311,8 @@ radv_shader_compile_to_nir(struct radv_device *device,
 		NIR_PASS_V(nir, nir_remove_dead_variables,
 		           nir_var_shader_in | nir_var_shader_out | nir_var_system_value);
 
+		NIR_PASS_V(nir, nir_propagate_invariant);
+
 		NIR_PASS_V(nir, nir_lower_system_values);
 		NIR_PASS_V(nir, nir_lower_clip_cull_distance_arrays);
 		NIR_PASS_V(nir, radv_nir_lower_ycbcr_textures, layout);
@@ -765,7 +767,7 @@ generate_shader_stats(struct radv_device *device,
 				     lds_increment);
 	} else if (stage == MESA_SHADER_COMPUTE) {
 		unsigned max_workgroup_size =
-				radv_nir_get_max_workgroup_size(chip_class, variant->nir);
+			radv_nir_get_max_workgroup_size(chip_class, stage, variant->nir);
 		lds_per_wave = (conf->lds_size * lds_increment) /
 			       DIV_ROUND_UP(max_workgroup_size, 64);
 	}

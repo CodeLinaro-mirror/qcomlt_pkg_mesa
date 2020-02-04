@@ -57,6 +57,7 @@
 #include "util/u_vector.h"
 #include "util/u_math.h"
 #include "util/vma.h"
+#include "util/xmlconfig.h"
 #include "vk_alloc.h"
 #include "vk_debug_report.h"
 
@@ -1009,6 +1010,9 @@ struct anv_instance {
     bool                                        pipeline_cache_enabled;
 
     struct vk_debug_report_instance             debug_report_callbacks;
+
+    struct driOptionCache                       dri_options;
+    struct driOptionCache                       available_dri_options;
 };
 
 VkResult anv_init_wsi(struct anv_physical_device *physical_device);
@@ -2170,12 +2174,6 @@ struct anv_xfb_binding {
 #define ANV_PARAM_DYN_OFFSET_IDX(param)   ((param) & 0xffff)
 
 struct anv_push_constants {
-   /* Current allocated size of this push constants data structure.
-    * Because a decent chunk of it may not be used (images on SKL, for
-    * instance), we won't actually allocate the entire structure up-front.
-    */
-   uint32_t size;
-
    /* Push constant data provided by the client through vkPushConstants */
    uint8_t client_data[MAX_PUSH_CONSTANTS_SIZE];
 
@@ -2358,7 +2356,7 @@ struct anv_cmd_state {
    bool                                         xfb_enabled;
    struct anv_xfb_binding                       xfb_bindings[MAX_XFB_BUFFERS];
    VkShaderStageFlags                           push_constant_stages;
-   struct anv_push_constants *                  push_constants[MESA_SHADER_STAGES];
+   struct anv_push_constants                    push_constants[MESA_SHADER_STAGES];
    struct anv_state                             binding_tables[MESA_SHADER_STAGES];
    struct anv_state                             samplers[MESA_SHADER_STAGES];
 
@@ -2477,14 +2475,6 @@ VkResult anv_cmd_buffer_execbuf(struct anv_device *device,
                                 VkFence fence);
 
 VkResult anv_cmd_buffer_reset(struct anv_cmd_buffer *cmd_buffer);
-
-VkResult
-anv_cmd_buffer_ensure_push_constants_size(struct anv_cmd_buffer *cmd_buffer,
-                                          gl_shader_stage stage, uint32_t size);
-#define anv_cmd_buffer_ensure_push_constant_field(cmd_buffer, stage, field) \
-   anv_cmd_buffer_ensure_push_constants_size(cmd_buffer, stage, \
-      (offsetof(struct anv_push_constants, field) + \
-       sizeof(cmd_buffer->state.push_constants[0]->field)))
 
 struct anv_state anv_cmd_buffer_emit_dynamic(struct anv_cmd_buffer *cmd_buffer,
                                              const void *data, uint32_t size, uint32_t alignment);

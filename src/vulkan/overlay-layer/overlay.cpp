@@ -921,6 +921,7 @@ static void CreateOrResizeBuffer(struct device_data *data,
 }
 
 static struct overlay_draw *render_swapchain_display(struct swapchain_data *data,
+                                                     struct queue_data *present_queue,
                                                      const VkSemaphore *wait_semaphores,
                                                      unsigned n_wait_semaphores,
                                                      unsigned image_index)
@@ -964,7 +965,7 @@ static struct overlay_draw *render_swapchain_display(struct swapchain_data *data
    imb.subresourceRange.levelCount = 1;
    imb.subresourceRange.baseArrayLayer = 0;
    imb.subresourceRange.layerCount = 1;
-   imb.srcQueueFamilyIndex = device_data->graphic_queue->family_index;
+   imb.srcQueueFamilyIndex = present_queue->family_index;
    imb.dstQueueFamilyIndex = device_data->graphic_queue->family_index;
    device_data->vtable.CmdPipelineBarrier(draw->command_buffer,
                                           VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
@@ -1091,6 +1092,30 @@ static struct overlay_draw *render_swapchain_display(struct swapchain_data *data
     }
 
    device_data->vtable.CmdEndRenderPass(draw->command_buffer);
+
+   /* Bounce the image to display back to present layout. */
+   imb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+   imb.pNext = nullptr;
+   imb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+   imb.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+   imb.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+   imb.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+   imb.image = data->images[image_index];
+   imb.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+   imb.subresourceRange.baseMipLevel = 0;
+   imb.subresourceRange.levelCount = 1;
+   imb.subresourceRange.baseArrayLayer = 0;
+   imb.subresourceRange.layerCount = 1;
+   imb.srcQueueFamilyIndex = device_data->graphic_queue->family_index;
+   imb.dstQueueFamilyIndex = present_queue->family_index;
+   device_data->vtable.CmdPipelineBarrier(draw->command_buffer,
+                                          VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                                          VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                                          0,          /* dependency flags */
+                                          0, nullptr, /* memory barriers */
+                                          0, nullptr, /* buffer memory barriers */
+                                          1, &imb);   /* image memory barriers */
+
    device_data->vtable.EndCommandBuffer(draw->command_buffer);
 
    VkSubmitInfo submit_info = {};
@@ -1523,6 +1548,7 @@ static void shutdown_swapchain_data(struct swapchain_data *data)
 }
 
 static struct overlay_draw *before_present(struct swapchain_data *swapchain_data,
+                                           struct queue_data *present_queue,
                                            const VkSemaphore *wait_semaphores,
                                            unsigned n_wait_semaphores,
                                            unsigned imageIndex)
@@ -1534,7 +1560,7 @@ static struct overlay_draw *before_present(struct swapchain_data *swapchain_data
 
    if (!instance_data->params.no_display && swapchain_data->n_frames > 0) {
       compute_swapchain_display(swapchain_data);
-      draw = render_swapchain_display(swapchain_data,
+      draw = render_swapchain_display(swapchain_data, present_queue,
                                       wait_semaphores, n_wait_semaphores,
                                       imageIndex);
    }
@@ -1644,6 +1670,7 @@ static VkResult overlay_QueuePresentKHR(
          struct swapchain_data *swapchain_data = FIND_SWAPCHAIN_DATA(swapchain);
 
          before_present(swapchain_data,
+                        queue_data,
                         pPresentInfo->pWaitSemaphores,
                         pPresentInfo->waitSemaphoreCount,
                         pPresentInfo->pImageIndices[i]);
@@ -1660,6 +1687,7 @@ static VkResult overlay_QueuePresentKHR(
          uint32_t image_index = pPresentInfo->pImageIndices[i];
 
          struct overlay_draw *draw = before_present(swapchain_data,
+                                                    queue_data,
                                                     pPresentInfo->pWaitSemaphores,
                                                     pPresentInfo->waitSemaphoreCount,
                                                     image_index);
@@ -1857,6 +1885,8 @@ static VkResult overlay_BeginCommandBuffer(
    struct command_buffer_data *cmd_buffer_data = FIND_CMD_BUFFER_DATA(commandBuffer);
    struct device_data *device_data = cmd_buffer_data->device;
 
+   memset(&cmd_buffer_data->stats, 0, sizeof(cmd_buffer_data->stats));
+
    /* We don't record any query in secondary command buffers, just make sure
     * we have the right inheritance.
     */
@@ -2042,6 +2072,10 @@ static void overlay_FreeCommandBuffers(
    for (uint32_t i = 0; i < commandBufferCount; i++) {
       struct command_buffer_data *cmd_buffer_data =
          FIND_CMD_BUFFER_DATA(pCommandBuffers[i]);
+      /* It is legal to free a NULL command buffer*/
+      if (!cmd_buffer_data)
+         continue;
+
       uint64_t count = (uintptr_t)find_object_data(HKEY(cmd_buffer_data->pipeline_query_pool));
       if (count == 1) {
          unmap_object(HKEY(cmd_buffer_data->pipeline_query_pool));

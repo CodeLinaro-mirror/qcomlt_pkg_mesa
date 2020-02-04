@@ -283,7 +283,7 @@ void anv_GetDescriptorSetLayoutSupport(
       /* Our maximum binding table size is 240 and we need to reserve 8 for
        * render targets.
        */
-      if (surface_count[s] >= MAX_BINDING_TABLE_SIZE - MAX_RTS)
+      if (surface_count[s] > MAX_BINDING_TABLE_SIZE - MAX_RTS)
          supported = false;
    }
 
@@ -1198,7 +1198,7 @@ anv_descriptor_set_write_image_view(struct anv_device *device,
       anv_descriptor_set_write_image_param(desc_map, image_param);
    }
 
-   if (bind_layout->data & ANV_DESCRIPTOR_TEXTURE_SWIZZLE) {
+   if (image_view && (bind_layout->data & ANV_DESCRIPTOR_TEXTURE_SWIZZLE)) {
       assert(!(bind_layout->data & ANV_DESCRIPTOR_SAMPLED_IMAGE));
       assert(image_view);
       struct anv_texture_swizzle_descriptor desc_data[3];
