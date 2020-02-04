@@ -1,3 +1,10 @@
+mesa (19.1.8-1+linaro1) experimental; urgency=medium
+ 
+  * Merge upstream 19.1.8 tag.
+  * Downgrade dependencies to build on debian buster llvm8 -> llvm7, libclc.
+
+ -- Anibal Limon <anibal.limon@linaro.org>  Tue, 04 Feb 2020 17:00:23 -0600
+
 mesa (19.1.1-1+linaro2) experimental; urgency=medium
 
   * freedreno: Fix assertion failures in context setup in shader-db mode.
