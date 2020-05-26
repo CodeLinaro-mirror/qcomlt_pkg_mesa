@@ -27,7 +27,6 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
 	$(C_SOURCES) \
-	$(drm_SOURCES) \
 	$(a2xx_SOURCES) \
 	$(a3xx_SOURCES)	\
 	$(a4xx_SOURCES) \
@@ -39,12 +38,13 @@ LOCAL_SRC_FILES := \
 #	-Wno-packed-bitfield-compat
 
 LOCAL_C_INCLUDES := \
-	$(LOCAL_PATH)/ir3
+	$(LOCAL_PATH)/ir3 \
+	$(MESA_TOP)/include
 
 LOCAL_GENERATED_SOURCES := $(MESA_GEN_NIR_H)
 
 LOCAL_SHARED_LIBRARIES := libdrm
-LOCAL_STATIC_LIBRARIES := libmesa_glsl libmesa_nir
+LOCAL_STATIC_LIBRARIES := libmesa_glsl libmesa_nir libfreedreno_drm libfreedreno_ir3 libfreedreno_perfcntrs libfreedreno_registers
 LOCAL_MODULE := libmesa_pipe_freedreno
 
 include $(LOCAL_PATH)/Android.gen.mk

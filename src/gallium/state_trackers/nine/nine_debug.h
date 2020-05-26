@@ -33,7 +33,7 @@ _nine_debug_printf( unsigned long flag,
 
 #define ERR(fmt, ...) _nine_debug_printf(DBG_ERROR, __FUNCTION__, fmt, ## __VA_ARGS__)
 
-#ifdef DEBUG
+#if defined(DEBUG) || !defined(NDEBUG)
 #define WARN(fmt, ...) _nine_debug_printf(DBG_WARN, __FUNCTION__, fmt, ## __VA_ARGS__)
 #define WARN_ONCE(fmt, ...) \
     do { \
@@ -44,15 +44,15 @@ _nine_debug_printf( unsigned long flag,
         } \
     } while(0)
 #else
-#define WARN(fmt, ...)
-#define WARN_ONCE(fmt, ...)
+#define WARN(fmt, ...) do {} while(0)
+#define WARN_ONCE(fmt, ...) do {} while(0)
 #endif
 
-#ifdef DEBUG
+#if defined(DEBUG) || !defined(NDEBUG)
 #define DBG_FLAG(flag, fmt, ...) \
     _nine_debug_printf(flag, __FUNCTION__, fmt, ## __VA_ARGS__)
 #else
-#define DBG_FLAG(flag, fmt, ...)
+#define DBG_FLAG(flag, fmt, ...) do {} while(0)
 #endif
 #define DBG(fmt, ...) DBG_FLAG(DBG_CHANNEL, fmt, ## __VA_ARGS__)
 
@@ -90,7 +90,7 @@ _nine_stub( const char *file,
             const char *func,
             unsigned line );
 
-#ifdef DEBUG
+#if defined(DEBUG) || !defined(NDEBUG)
 #define STUB(ret) \
     do { \
         _nine_stub(__FILE__, __FUNCTION__, __LINE__); \
@@ -104,7 +104,7 @@ _nine_stub( const char *file,
  * macro is designed to be used in conditionals ala
  * if (user_error(required condition)) { assertion failed }
  * It also prints debug message if the assertion fails. */
-#ifdef DEBUG
+#if defined(DEBUG) || !defined(NDEBUG)
 #define user_error(x) \
     (!(x) ? (DBG_FLAG(DBG_USER, "User assertion failed: `%s'\n", #x), TRUE) \
           : FALSE)
@@ -112,11 +112,11 @@ _nine_stub( const char *file,
 #define user_error(x) (!(x) ? TRUE : FALSE)
 #endif
 
-#ifdef DEBUG
+#if defined(DEBUG) || !defined(NDEBUG)
 #define user_warn(x) \
     if ((x)) { DBG_FLAG(DBG_USER, "User warning: `%s'\n", #x); }
 #else
-#define user_warn(x)
+#define user_warn(x) do {} while(0)
 #endif
 
 /* nonfatal assert */

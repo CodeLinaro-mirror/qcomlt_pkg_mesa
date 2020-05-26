@@ -57,8 +57,7 @@ struct dri_screen
 
    /* dri */
    __DRIscreen *sPriv;
-   boolean throttling_enabled;
-   int default_throttle_frames;
+   boolean throttle;
 
    struct st_config_options options;
 
@@ -103,11 +102,14 @@ struct __DRIimageRec {
    unsigned level;
    unsigned layer;
    uint32_t dri_format;
+   uint32_t dri_fourcc;
    uint32_t dri_components;
    unsigned use;
+   unsigned plane;
 
    void *loader_private;
 
+   boolean imported_dmabuf;
    /**
     * Provided by EGL_EXT_image_dma_buf_import.
     */

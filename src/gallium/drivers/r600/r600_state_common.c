@@ -28,7 +28,7 @@
 #include "r600_shader.h"
 #include "r600d.h"
 
-#include "util/u_format_s3tc.h"
+#include "util/format/u_format_s3tc.h"
 #include "util/u_index_modify.h"
 #include "util/u_memory.h"
 #include "util/u_upload_mgr.h"
@@ -94,6 +94,10 @@ void r600_emit_alphatest_state(struct r600_context *rctx, struct r600_atom *atom
 static void r600_memory_barrier(struct pipe_context *ctx, unsigned flags)
 {
 	struct r600_context *rctx = (struct r600_context *)ctx;
+
+	if (!(flags & ~PIPE_BARRIER_UPDATE))
+		return;
+
 	if (flags & PIPE_BARRIER_CONSTANT_BUFFER)
 		rctx->b.flags |= R600_CONTEXT_INV_CONST_CACHE;
 
@@ -415,7 +419,7 @@ static void r600_sampler_view_destroy(struct pipe_context *ctx,
 
 	if (view->tex_resource->gpu_address &&
 	    view->tex_resource->b.b.target == PIPE_BUFFER)
-		LIST_DELINIT(&view->list);
+		list_delinit(&view->list);
 
 	pipe_resource_reference(&state->texture, NULL);
 	FREE(view);
@@ -542,7 +546,8 @@ static void r600_bind_vertex_elements(struct pipe_context *ctx, void *state)
 static void r600_delete_vertex_elements(struct pipe_context *ctx, void *state)
 {
 	struct r600_fetch_shader *shader = (struct r600_fetch_shader*)state;
-	r600_resource_reference(&shader->buffer, NULL);
+	if (shader)
+		r600_resource_reference(&shader->buffer, NULL);
 	FREE(shader);
 }
 
@@ -1020,7 +1025,9 @@ static void r600_bind_vs_state(struct pipe_context *ctx, void *state)
 
 	rctx->vs_shader = (struct r600_pipe_shader_selector *)state;
 	r600_update_vs_writes_viewport_index(&rctx->b, r600_get_vs_info(rctx));
-	rctx->b.streamout.stride_in_dw = rctx->vs_shader->so.stride;
+
+        if (rctx->vs_shader->so.num_outputs)
+           rctx->b.streamout.stride_in_dw = rctx->vs_shader->so.stride;
 }
 
 static void r600_bind_gs_state(struct pipe_context *ctx, void *state)
@@ -1035,7 +1042,9 @@ static void r600_bind_gs_state(struct pipe_context *ctx, void *state)
 
 	if (!state)
 		return;
-	rctx->b.streamout.stride_in_dw = rctx->gs_shader->so.stride;
+
+        if (rctx->gs_shader->so.num_outputs)
+           rctx->b.streamout.stride_in_dw = rctx->gs_shader->so.stride;
 }
 
 static void r600_bind_tcs_state(struct pipe_context *ctx, void *state)
@@ -1057,7 +1066,9 @@ static void r600_bind_tes_state(struct pipe_context *ctx, void *state)
 
 	if (!state)
 		return;
-	rctx->b.streamout.stride_in_dw = rctx->tes_shader->so.stride;
+
+        if (rctx->tes_shader->so.num_outputs)
+           rctx->b.streamout.stride_in_dw = rctx->tes_shader->so.stride;
 }
 
 void r600_delete_shader_selector(struct pipe_context *ctx,
@@ -2917,6 +2928,7 @@ uint32_t r600_translate_texformat(struct pipe_screen *screen,
 			switch (desc->nr_channels) {
 			case 1:
 				result = FMT_8;
+				is_srgb_valid = TRUE;
 				goto out_word4;
 			case 2:
 				result = FMT_8_8;
@@ -3266,7 +3278,7 @@ static void r600_invalidate_buffer(struct pipe_context *ctx, struct pipe_resourc
 
 }
 
-static void r600_set_active_query_state(struct pipe_context *ctx, boolean enable)
+static void r600_set_active_query_state(struct pipe_context *ctx, bool enable)
 {
 	struct r600_context *rctx = (struct r600_context*)ctx;
 

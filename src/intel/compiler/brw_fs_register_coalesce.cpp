@@ -86,7 +86,7 @@ is_coalesce_candidate(const fs_visitor *v, const fs_inst *inst)
       return false;
 
    if (inst->opcode == SHADER_OPCODE_LOAD_PAYLOAD) {
-      if (!inst->is_copy_payload(v->alloc)) {
+      if (!is_coalescing_payload(v->alloc, inst)) {
          return false;
       }
    }
@@ -158,7 +158,7 @@ fs_visitor::register_coalesce()
 
    int src_size = 0;
    int channels_remaining = 0;
-   int src_reg = -1, dst_reg = -1;
+   unsigned src_reg = ~0u, dst_reg = ~0u;
    int dst_reg_offset[MAX_VGRF_SIZE];
    fs_inst *mov[MAX_VGRF_SIZE];
    int dst_var[MAX_VGRF_SIZE];
@@ -221,7 +221,7 @@ fs_visitor::register_coalesce()
          if (dst_reg_offset[i] != dst_reg_offset[0] + i) {
             /* Registers are out-of-order. */
             can_coalesce = false;
-            src_reg = -1;
+            src_reg = ~0u;
             break;
          }
 
@@ -231,7 +231,7 @@ fs_visitor::register_coalesce()
          if (!can_coalesce_vars(live_intervals, cfg, inst,
                                 dst_var[i], src_var[i])) {
             can_coalesce = false;
-            src_reg = -1;
+            src_reg = ~0u;
             break;
          }
       }
@@ -242,13 +242,26 @@ fs_visitor::register_coalesce()
       progress = true;
 
       for (int i = 0; i < src_size; i++) {
-         if (mov[i]) {
+         if (!mov[i])
+            continue;
+
+         if (mov[i]->conditional_mod == BRW_CONDITIONAL_NONE) {
             mov[i]->opcode = BRW_OPCODE_NOP;
-            mov[i]->conditional_mod = BRW_CONDITIONAL_NONE;
             mov[i]->dst = reg_undef;
             for (int j = 0; j < mov[i]->sources; j++) {
                mov[i]->src[j] = reg_undef;
             }
+         } else {
+            /* If we have a conditional modifier, rewrite the MOV to be a
+             * MOV.cmod from the coalesced register.  Hopefully, cmod
+             * propagation will clean this up and move it to the instruction
+             * that writes the register.  If not, this keeps things correct
+             * while still letting us coalesce.
+             */
+            assert(mov[i]->opcode == BRW_OPCODE_MOV);
+            assert(mov[i]->sources == 1);
+            mov[i]->src[0] = mov[i]->dst;
+            mov[i]->dst = retype(brw_null_reg(), mov[i]->dst.type);
          }
       }
 
@@ -278,7 +291,7 @@ fs_visitor::register_coalesce()
             MAX2(live_intervals->end[dst_var[i]],
                  live_intervals->end[src_var[i]]);
       }
-      src_reg = -1;
+      src_reg = ~0u;
    }
 
    if (progress) {

@@ -81,8 +81,9 @@ struct winsys_handle;
 #define SVGA_FENCE_FLAG_EXEC      (1 << 0)
 #define SVGA_FENCE_FLAG_QUERY     (1 << 1)
 
-#define SVGA_SURFACE_USAGE_SHARED  (1 << 0)
-#define SVGA_SURFACE_USAGE_SCANOUT (1 << 1)
+#define SVGA_SURFACE_USAGE_SHARED   (1 << 0)
+#define SVGA_SURFACE_USAGE_SCANOUT  (1 << 1)
+#define SVGA_SURFACE_USAGE_COHERENT (1 << 2)
 
 #define SVGA_QUERY_FLAG_SET        (1 << 0)
 #define SVGA_QUERY_FLAG_REF        (1 << 1)
@@ -385,10 +386,15 @@ struct svga_winsys_context
     **/
 
    boolean have_gb_objects;
+   boolean force_coherent;
 
    /**
     * Map a guest-backed surface.
+    * \param swc The winsys context
+    * \param surface The surface to map
     * \param flags  bitmaks of PIPE_TRANSFER_x flags
+    * \param retry Whether to flush and retry the map
+    * \param rebind Whether to issue an immediate rebind and flush.
     *
     * The surface_map() member is allowed to fail due to a
     * shortage of command buffer space, if the
@@ -399,7 +405,8 @@ struct svga_winsys_context
    void *
    (*surface_map)(struct svga_winsys_context *swc,
                   struct svga_winsys_surface *surface,
-                  unsigned flags, boolean *retry);
+                  unsigned flags, boolean *retry,
+                  boolean *rebind);
 
    /**
     * Unmap a guest-backed surface.
@@ -410,13 +417,6 @@ struct svga_winsys_context
    (*surface_unmap)(struct svga_winsys_context *swc,
                     struct svga_winsys_surface *surface,
                     boolean *rebind);
-
-   /**
-    * Invalidate the content of this surface
-    */
-   enum pipe_error
-   (*surface_invalidate)(struct svga_winsys_context *swc,
-                         struct svga_winsys_surface *surface);
 
    /**
     * Create and define a DX GB shader that resides in the device COTable.
@@ -683,6 +683,8 @@ struct svga_winsys_screen
    /** Can we do DMA with guest-backed objects enabled? */
    bool have_gb_dma;
 
+   /** Do we support coherent surface memory? */
+   bool have_coherent;
    /**
     * Create and define a GB shader.
     */
@@ -753,6 +755,11 @@ struct svga_winsys_screen
    void
    (*stats_time_pop)();
 
+   /**
+    * Send a host log message
+    */
+   void
+   (*host_log)(struct svga_winsys_screen *sws, const char *message);
 
    /** Have VGPU v10 hardware? */
    boolean have_vgpu10;

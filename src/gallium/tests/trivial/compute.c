@@ -36,7 +36,7 @@
 #include "util/u_memory.h"
 #include "util/u_inlines.h"
 #include "util/u_sampler.h"
-#include "util/u_format.h"
+#include "util/format/u_format.h"
 #include "tgsi/tgsi_text.h"
 #include "pipe-loader/pipe_loader.h"
 
@@ -240,7 +240,7 @@ static void check_tex(struct context *ctx, int slot,
                   util_format_get_nblocksy(tex->format, tex->height0));
         struct pipe_transfer *xfer;
         char *map;
-        int x, y, i;
+        int x = 0, y, i;
         int err = 0;
 
         if (!check)

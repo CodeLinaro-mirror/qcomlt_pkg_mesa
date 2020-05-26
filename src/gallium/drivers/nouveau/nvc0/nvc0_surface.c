@@ -26,7 +26,7 @@
 
 #include "util/u_inlines.h"
 #include "util/u_pack_color.h"
-#include "util/u_format.h"
+#include "util/format/u_format.h"
 #include "util/u_surface.h"
 
 #include "os/os_thread.h"
@@ -534,7 +534,7 @@ nvc0_clear_buffer(struct pipe_context *pipe,
       return;
    }
 
-   util_range_add(&buf->valid_buffer_range, offset, offset + size);
+   util_range_add(&buf->base, &buf->valid_buffer_range, offset, offset + size);
 
    assert(size % data_size == 0);
 
@@ -1178,6 +1178,7 @@ nvc0_blitctx_post_blit(struct nvc0_blitctx *blit)
                                        nvc0->cond_cond, nvc0->cond_mode);
 
    nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_VTX_TMP);
+   nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEXT);
    nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_FB);
    nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEX(4, 0));
    nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TEX(4, 1));
@@ -1200,6 +1201,7 @@ nvc0_blitctx_post_blit(struct nvc0_blitctx *blit)
 static void
 nvc0_blit_3d(struct nvc0_context *nvc0, const struct pipe_blit_info *info)
 {
+   struct nvc0_screen *screen = nvc0->screen;
    struct nvc0_blitctx *blit = nvc0->blit;
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct pipe_resource *src = info->src.resource;
@@ -1274,6 +1276,18 @@ nvc0_blit_3d(struct nvc0_context *nvc0, const struct pipe_blit_info *info)
     * render target, with scissors defining the destination region.
     * The vertex is supplied with non-normalized texture coordinates
     * arranged in a way to yield the desired offset and scale.
+    *
+    * Note that while the source texture is presented to the sampler as
+    * non-MSAA (even if it is), the destination texture is treated as MSAA for
+    * rendering. This means that
+    *  - destination coordinates shouldn't be scaled
+    *  - without per-sample rendering, the target will be a solid-fill for all
+    *    of the samples
+    *
+    * The last point implies that this process is very bad for 1:1 blits, as
+    * well as scaled blits between MSAA surfaces. This works fine for
+    * upscaling and downscaling though. The 1:1 blits should ideally be
+    * handled by the 2d engine, which can do it perfectly.
     */
 
    minx = info->dst.box.x;
@@ -1301,6 +1315,8 @@ nvc0_blit_3d(struct nvc0_context *nvc0, const struct pipe_blit_info *info)
 
    BCTX_REFN_bo(nvc0->bufctx_3d, 3D_VTX_TMP,
                 NOUVEAU_BO_GART | NOUVEAU_BO_RD, vtxbuf_bo);
+   BCTX_REFN_bo(nvc0->bufctx_3d, 3D_TEXT,
+                NV_VRAM_DOMAIN(&screen->base) | NOUVEAU_BO_RD, screen->text);
    nouveau_pushbuf_validate(push);
 
    BEGIN_NVC0(push, NVC0_3D(VERTEX_ARRAY_FETCH(0)), 4);
@@ -1360,14 +1376,14 @@ nvc0_blit_3d(struct nvc0_context *nvc0, const struct pipe_blit_info *info)
       *(vbuf++) = fui(y0);
       *(vbuf++) = fui(z);
 
-      *(vbuf++) = fui(32768 << nv50_miptree(dst)->ms_x);
+      *(vbuf++) = fui(32768.0f);
       *(vbuf++) = fui(0.0f);
       *(vbuf++) = fui(x1);
       *(vbuf++) = fui(y0);
       *(vbuf++) = fui(z);
 
       *(vbuf++) = fui(0.0f);
-      *(vbuf++) = fui(32768 << nv50_miptree(dst)->ms_y);
+      *(vbuf++) = fui(32768.0f);
       *(vbuf++) = fui(x0);
       *(vbuf++) = fui(y1);
       *(vbuf++) = fui(z);

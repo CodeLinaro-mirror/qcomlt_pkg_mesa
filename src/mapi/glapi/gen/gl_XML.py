@@ -49,7 +49,7 @@ def parse_GL_API( file_name, factory = None ):
     # that are not part of the ABI.
 
     for func in api.functionIterateByCategory():
-        if func.assign_offset:
+        if func.assign_offset and func.offset < 0:
             func.offset = api.next_offset;
             api.next_offset += 1
 
@@ -565,7 +565,14 @@ class gl_parameter(object):
 
 
     def size_string(self, use_parens = 1):
-        s = self.size()
+        base_size_str = ""
+
+        count = self.get_element_count()
+        if count:
+            base_size_str = "%d * " % count
+
+        base_size_str += "sizeof(%s)" % ( self.get_base_type_string() )
+
         if self.counter or self.count_parameter_list:
             list = [ "compsize" ]
 
@@ -574,8 +581,8 @@ class gl_parameter(object):
             elif self.counter:
                 list = [ self.counter ]
 
-            if s > 1:
-                list.append( str(s) )
+            if self.size() > 1:
+                list.append( base_size_str )
 
             if len(list) > 1 and use_parens :
                 return "safe_mul(%s)" % ", ".join(list)
@@ -585,7 +592,7 @@ class gl_parameter(object):
         elif self.is_image():
             return "compsize"
         else:
-            return str(s)
+            return base_size_str
 
 
     def format_string(self):
@@ -611,21 +618,11 @@ class gl_function( gl_item ):
         self.deprecated = None
         self.has_no_error_variant = False
 
-        # self.entry_point_api_map[name][api] is a decimal value
-        # indicating the earliest version of the given API in which
-        # each entry point exists.  Every entry point is included in
-        # the first level of the map; the second level of the map only
-        # lists APIs which contain the entry point in at least one
-        # version.  For example,
-        # self.entry_point_api_map['ClipPlanex'] == { 'es1':
-        # Decimal('1.1') }.
-        self.entry_point_api_map = {}
-
         # self.api_map[api] is a decimal value indicating the earliest
         # version of the given API in which ANY alias for the function
         # exists.  The map only lists APIs which contain the function
         # in at least one version.  For example, for the ClipPlanex
-        # function, self.entry_point_api_map == { 'es1':
+        # function, self.api_map == { 'es1':
         # Decimal('1.1') }.
         self.api_map = {}
 
@@ -658,13 +655,11 @@ class gl_function( gl_item ):
 
         self.entry_points.append( name )
 
-        self.entry_point_api_map[name] = {}
         for api in ('es1', 'es2'):
             version_str = element.get(api, 'none')
             assert version_str is not None
             if version_str != 'none':
                 version_decimal = Decimal(version_str)
-                self.entry_point_api_map[name][api] = version_decimal
                 if api not in self.api_map or \
                         version_decimal < self.api_map[api]:
                     self.api_map[api] = version_decimal
@@ -693,10 +688,14 @@ class gl_function( gl_item ):
             # Only try to set the offset when a non-alias entry-point
             # is being processed.
 
-            if name in static_data.offsets:
+            if name in static_data.offsets and static_data.offsets[name] <= static_data.MAX_OFFSETS:
                 self.offset = static_data.offsets[name]
+            elif name in static_data.offsets and static_data.offsets[name] > static_data.MAX_OFFSETS:
+                self.offset = static_data.offsets[name]
+                self.assign_offset = True
             else:
-                self.offset = -1
+                if self.exec_flavor != "skip":
+                    raise RuntimeError("Entry-point %s is missing offset in static_data.py. Add one at the bottom of the list." % (name))
                 self.assign_offset = self.exec_flavor != "skip" or name in static_data.unused_functions
 
         if not self.name:
@@ -826,23 +825,6 @@ class gl_function( gl_item ):
         else:
             return "_dispatch_stub_%u" % (self.offset)
 
-    def entry_points_for_api_version(self, api, version = None):
-        """Return a list of the entry point names for this function
-        which are supported in the given API (and optionally, version).
-
-        Use the decimal.Decimal type to precisely express non-integer
-        versions.
-        """
-        result = []
-        for entry_point, api_to_ver in self.entry_point_api_map.items():
-            if api not in api_to_ver:
-                continue
-            if version is not None and version < api_to_ver[api]:
-                continue
-            result.append(entry_point)
-        return result
-
-
 class gl_item_factory(object):
     """Factory to create objects derived from gl_item."""
 
@@ -877,31 +859,6 @@ class gl_api(object):
 
         typeexpr.create_initial_types()
         return
-
-    def filter_functions(self, entry_point_list):
-        """Filter out entry points not in entry_point_list."""
-        functions_by_name = {}
-        for func in self.functions_by_name.values():
-            entry_points = [ent for ent in func.entry_points if ent in entry_point_list]
-            if entry_points:
-                func.filter_entry_points(entry_points)
-                functions_by_name[func.name] = func
-
-        self.functions_by_name = functions_by_name
-
-    def filter_functions_by_api(self, api, version = None):
-        """Filter out entry points not in the given API (or
-        optionally, not in the given version of the given API).
-        """
-        functions_by_name = {}
-        for func in self.functions_by_name.values():
-            entry_points = func.entry_points_for_api_version(api, version)
-            if entry_points:
-                func.filter_entry_points(entry_points)
-                functions_by_name[func.name] = func
-
-        self.functions_by_name = functions_by_name
-
 
     def parse_file(self, file_name):
         doc = ET.parse( file_name )

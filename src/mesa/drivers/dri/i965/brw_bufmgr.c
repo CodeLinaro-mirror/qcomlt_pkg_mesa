@@ -49,11 +49,8 @@
 #include <stdbool.h>
 
 #include "errno.h"
-#ifndef ETIME
-#define ETIME ETIMEDOUT
-#endif
 #include "common/gen_clflush.h"
-#include "common/gen_debug.h"
+#include "dev/gen_debug.h"
 #include "common/gen_gem.h"
 #include "dev/gen_device_info.h"
 #include "libdrm_macros.h"
@@ -67,7 +64,7 @@
 #include "brw_context.h"
 #include "string.h"
 
-#include "i915_drm.h"
+#include "drm-uapi/i915_drm.h"
 
 #ifdef HAVE_VALGRIND
 #include <valgrind.h>
@@ -139,6 +136,10 @@ struct bo_cache_bucket {
 };
 
 struct brw_bufmgr {
+   uint32_t refcount;
+
+   struct list_head link;
+
    int fd;
 
    mtx_t lock;
@@ -160,6 +161,12 @@ struct brw_bufmgr {
    uint64_t initial_kflags;
 };
 
+static mtx_t global_bufmgr_list_mutex = _MTX_INITIALIZER_NP;
+static struct list_head global_bufmgr_list = {
+   .next = &global_bufmgr_list,
+   .prev = &global_bufmgr_list,
+};
+
 static int bo_set_tiling_internal(struct brw_bo *bo, uint32_t tiling_mode,
                                   uint32_t stride);
 
@@ -168,18 +175,6 @@ static void bo_free(struct brw_bo *bo);
 static uint64_t vma_alloc(struct brw_bufmgr *bufmgr,
                           enum brw_memory_zone memzone,
                           uint64_t size, uint64_t alignment);
-
-static uint32_t
-key_hash_uint(const void *key)
-{
-   return _mesa_hash_data(key, 4);
-}
-
-static bool
-key_uint_equal(const void *a, const void *b)
-{
-   return *((unsigned *) a) == *((unsigned *) b);
-}
 
 static struct brw_bo *
 hash_find_bo(struct hash_table *ht, unsigned int key)
@@ -294,7 +289,7 @@ bucket_vma_alloc(struct brw_bufmgr *bufmgr,
        * Set the first bit used, and return the start address.
        */
       uint64_t node_size = 64ull * bucket->size;
-      node = util_dynarray_grow(vma_list, sizeof(struct vma_bucket_node));
+      node = util_dynarray_grow(vma_list, struct vma_bucket_node, 1);
 
       if (unlikely(!node))
          return 0ull;
@@ -351,7 +346,7 @@ bucket_vma_free(struct bo_cache_bucket *bucket, uint64_t address)
 
    if (!node) {
       /* No node - the whole group of 64 blocks must have been in-use. */
-      node = util_dynarray_grow(vma_list, sizeof(struct vma_bucket_node));
+      node = util_dynarray_grow(vma_list, struct vma_bucket_node, 1);
 
       if (unlikely(!node))
          return; /* bogus, leaks some GPU VMA, but nothing we can do... */
@@ -401,6 +396,8 @@ vma_alloc(struct brw_bufmgr *bufmgr,
 {
    /* Without softpin support, we let the kernel assign addresses. */
    assert(brw_using_softpin(bufmgr));
+
+   alignment = ALIGN(alignment, PAGE_SIZE);
 
    struct bo_cache_bucket *bucket = get_bucket_allocator(bufmgr, size);
    uint64_t addr;
@@ -532,7 +529,7 @@ bo_alloc_internal(struct brw_bufmgr *bufmgr,
    /* Get a buffer out of the cache if available */
 retry:
    alloc_from_cache = false;
-   if (bucket != NULL && !list_empty(&bucket->head)) {
+   if (bucket != NULL && !list_is_empty(&bucket->head)) {
       if (busy && !zeroed) {
          /* Allocate new render-target BOs from the tail (MRU)
           * of the list, as it will likely be hot in the GPU
@@ -1292,8 +1289,19 @@ brw_bo_wait(struct brw_bo *bo, int64_t timeout_ns)
 }
 
 void
-brw_bufmgr_destroy(struct brw_bufmgr *bufmgr)
+brw_bufmgr_unref(struct brw_bufmgr *bufmgr)
 {
+   mtx_lock(&global_bufmgr_list_mutex);
+   if (p_atomic_dec_zero(&bufmgr->refcount)) {
+      list_del(&bufmgr->link);
+   } else {
+      bufmgr = NULL;
+   }
+   mtx_unlock(&global_bufmgr_list_mutex);
+
+   if (!bufmgr)
+      return;
+
    mtx_destroy(&bufmgr->lock);
 
    /* Free any cached buffer objects we were going to reuse */
@@ -1321,6 +1329,9 @@ brw_bufmgr_destroy(struct brw_bufmgr *bufmgr)
          util_vma_heap_finish(&bufmgr->vma_allocator[z]);
       }
    }
+
+   close(bufmgr->fd);
+   bufmgr->fd = -1;
 
    free(bufmgr);
 }
@@ -1529,19 +1540,6 @@ brw_bo_flink(struct brw_bo *bo, uint32_t *name)
    return 0;
 }
 
-/**
- * Enables unlimited caching of buffer objects for reuse.
- *
- * This is potentially very memory expensive, as the cache at each bucket
- * size is only bounded by how many buffers of that size we've managed to have
- * in flight at once.
- */
-void
-brw_bufmgr_enable_reuse(struct brw_bufmgr *bufmgr)
-{
-   bufmgr->bo_reuse = true;
-}
-
 static void
 add_bucket(struct brw_bufmgr *bufmgr, int size)
 {
@@ -1677,14 +1675,21 @@ brw_using_softpin(struct brw_bufmgr *bufmgr)
    return bufmgr->initial_kflags & EXEC_OBJECT_PINNED;
 }
 
+static struct brw_bufmgr *
+brw_bufmgr_ref(struct brw_bufmgr *bufmgr)
+{
+   p_atomic_inc(&bufmgr->refcount);
+   return bufmgr;
+}
+
 /**
  * Initializes the GEM buffer manager, which uses the kernel to allocate, map,
  * and manage map buffer objections.
  *
  * \param fd File descriptor of the opened DRM device.
  */
-struct brw_bufmgr *
-brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
+static struct brw_bufmgr *
+brw_bufmgr_create(struct gen_device_info *devinfo, int fd, bool bo_reuse)
 {
    struct brw_bufmgr *bufmgr;
 
@@ -1701,9 +1706,16 @@ brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
     * Don't do this! Ensure that each library/bufmgr has its own device
     * fd so that its namespace does not clash with another.
     */
-   bufmgr->fd = fd;
+   bufmgr->fd = dup(fd);
+   if (bufmgr->fd < 0) {
+      free(bufmgr);
+      return NULL;
+   }
+
+   p_atomic_set(&bufmgr->refcount, 1);
 
    if (mtx_init(&bufmgr->lock, mtx_plain) != 0) {
+      close(bufmgr->fd);
       free(bufmgr);
       return NULL;
    }
@@ -1714,8 +1726,12 @@ brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
 
    bufmgr->has_llc = devinfo->has_llc;
    bufmgr->has_mmap_wc = gem_param(fd, I915_PARAM_MMAP_VERSION) > 0;
+   bufmgr->bo_reuse = bo_reuse;
 
    const uint64_t _4GB = 4ull << 30;
+
+   /* The STATE_BASE_ADDRESS size field can only hold 1 page shy of 4GB */
+   const uint64_t _4GB_minus_1 = _4GB - PAGE_SIZE;
 
    if (devinfo->gen >= 8 && gtt_size > _4GB) {
       bufmgr->initial_kflags |= EXEC_OBJECT_SUPPORTS_48B_ADDRESS;
@@ -1726,9 +1742,13 @@ brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
          bufmgr->initial_kflags |= EXEC_OBJECT_PINNED;
 
          util_vma_heap_init(&bufmgr->vma_allocator[BRW_MEMZONE_LOW_4G],
-                            PAGE_SIZE, _4GB);
+                            PAGE_SIZE, _4GB_minus_1);
+
+         /* Leave the last 4GB out of the high vma range, so that no state
+          * base address + size can overflow 48 bits.
+          */
          util_vma_heap_init(&bufmgr->vma_allocator[BRW_MEMZONE_OTHER],
-                            1 * _4GB, gtt_size - 1 * _4GB);
+                            1 * _4GB, gtt_size - 2 * _4GB);
       } else if (devinfo->gen >= 10) {
          /* Softpin landed in 4.5, but GVT used an aliasing PPGTT until
           * kernel commit 6b3816d69628becb7ff35978aa0751798b4a940a in
@@ -1737,6 +1757,7 @@ brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
           * might actually mean requiring 4.14.
           */
          fprintf(stderr, "i965 requires softpin (Kernel 4.5) on Gen10+.");
+         close(bufmgr->fd);
          free(bufmgr);
          return NULL;
       }
@@ -1745,9 +1766,47 @@ brw_bufmgr_init(struct gen_device_info *devinfo, int fd)
    init_cache_buckets(bufmgr);
 
    bufmgr->name_table =
-      _mesa_hash_table_create(NULL, key_hash_uint, key_uint_equal);
+      _mesa_hash_table_create(NULL, _mesa_hash_uint, _mesa_key_uint_equal);
    bufmgr->handle_table =
-      _mesa_hash_table_create(NULL, key_hash_uint, key_uint_equal);
+      _mesa_hash_table_create(NULL, _mesa_hash_uint, _mesa_key_uint_equal);
 
    return bufmgr;
+}
+
+struct brw_bufmgr *
+brw_bufmgr_get_for_fd(struct gen_device_info *devinfo, int fd, bool bo_reuse)
+{
+   struct stat st;
+
+   if (fstat(fd, &st))
+      return NULL;
+
+   struct brw_bufmgr *bufmgr = NULL;
+
+   mtx_lock(&global_bufmgr_list_mutex);
+   list_for_each_entry(struct brw_bufmgr, iter_bufmgr, &global_bufmgr_list, link) {
+      struct stat iter_st;
+      if (fstat(iter_bufmgr->fd, &iter_st))
+         continue;
+
+      if (st.st_rdev == iter_st.st_rdev) {
+         assert(iter_bufmgr->bo_reuse == bo_reuse);
+         bufmgr = brw_bufmgr_ref(iter_bufmgr);
+         goto unlock;
+      }
+   }
+
+   bufmgr = brw_bufmgr_create(devinfo, fd, bo_reuse);
+   list_addtail(&bufmgr->link, &global_bufmgr_list);
+
+ unlock:
+   mtx_unlock(&global_bufmgr_list_mutex);
+
+   return bufmgr;
+}
+
+int
+brw_bufmgr_get_fd(struct brw_bufmgr *bufmgr)
+{
+   return bufmgr->fd;
 }

@@ -176,7 +176,7 @@ namespace {
 
    module::section
    make_text_section(const std::vector<char> &code) {
-      const pipe_llvm_program_header header { uint32_t(code.size()) };
+      const pipe_binary_program_header header { uint32_t(code.size()) };
       module::section text { 0, module::section::text_executable,
                              header.num_bytes, {} };
 
@@ -196,8 +196,9 @@ clover::llvm::build_module_common(const Module &mod,
                                   const clang::CompilerInstance &c) {
    module m;
 
-   for (const auto &name : map(std::mem_fn(&Function::getName),
+   for (const auto &llvm_name : map(std::mem_fn(&Function::getName),
                                get_kernels(mod))) {
+      const ::std::string name(llvm_name);
       if (offsets.count(name))
          m.syms.emplace_back(name, 0, offsets.at(name),
                              make_kernel_args(mod, name, c));

@@ -36,6 +36,7 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := \
 	$(LIBEGL_C_FILES) \
 	$(dri2_backend_core_FILES) \
+	drivers/dri2/platform_device.c \
 	drivers/dri2/platform_android.c
 
 LOCAL_CFLAGS := \
@@ -43,7 +44,7 @@ LOCAL_CFLAGS := \
 	-DHAVE_ANDROID_PLATFORM
 
 LOCAL_C_INCLUDES := \
-	$(MESA_TOP)/include/drm-uapi \
+	$(MESA_TOP)/include \
 	$(MESA_TOP)/src/egl/main \
 	$(MESA_TOP)/src/egl/drivers/dri2
 
@@ -58,6 +59,13 @@ LOCAL_SHARED_LIBRARIES := \
 	liblog \
 	libcutils \
 	libsync
+
+ifeq ($(shell test $(PLATFORM_SDK_VERSION) -ge 27; echo $$?), 0)
+LOCAL_C_INCLUDES += \
+	frameworks/native/libs/nativewindow/include \
+	frameworks/native/libs/arect/include
+LOCAL_HEADER_LIBRARIES += libnativebase_headers
+endif
 
 ifeq ($(BOARD_USES_DRM_GRALLOC),true)
 	LOCAL_CFLAGS += -DHAVE_DRM_GRALLOC

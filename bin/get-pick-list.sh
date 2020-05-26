@@ -13,12 +13,12 @@
 
 is_stable_nomination()
 {
-	git show --summary "$1" | grep -q -i -o "CC:.*mesa-stable"
+	git show --pretty=medium --summary "$1" | grep -q -i -o "CC:.*mesa-stable"
 }
 
 is_typod_nomination()
 {
-	git show --summary "$1" | grep -q -i -o "CC:.*mesa-dev"
+	git show --pretty=medium --summary "$1" | grep -q -i -o "CC:.*mesa-dev"
 }
 
 fixes=
@@ -32,7 +32,7 @@ is_sha_nomination()
 {
 	fixes=`git show --pretty=medium -s $1 | tr -d "\n" | \
 		sed -e 's/'"$2"'/\nfixes:/Ig' | \
-		grep -Eo 'fixes:[a-f0-9]{8,40}'`
+		grep -Eo 'fixes:[a-f0-9]{4,40}'`
 
 	fixes_count=`echo "$fixes" | grep "fixes:" | wc -l`
 	if test $fixes_count -eq 0; then
@@ -44,7 +44,7 @@ is_sha_nomination()
 		# Treat only the current line
 		id=`echo "$fixes" | tail -n $fixes_count | head -n 1 | cut -d : -f 2`
 		fixes_count=$(($fixes_count-1))
-		if ! git show $id &>/dev/null; then
+		if ! git show $id >/dev/null 2>&1; then
 			echo WARNING: Commit $1 lists invalid sha $id
 		fi
 	done
@@ -143,7 +143,7 @@ do
 	esac
 
 	printf "[ %8s ] " "$tag"
-	git --no-pager show --summary --oneline $sha
+	git --no-pager show --no-patch --pretty=oneline $sha
 done
 
 rm -f already_picked

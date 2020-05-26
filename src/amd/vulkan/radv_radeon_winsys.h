@@ -45,7 +45,9 @@ struct radeon_surf;
 enum radeon_bo_domain { /* bitfield */
 	RADEON_DOMAIN_GTT  = 2,
 	RADEON_DOMAIN_VRAM = 4,
-	RADEON_DOMAIN_VRAM_GTT = RADEON_DOMAIN_VRAM | RADEON_DOMAIN_GTT
+	RADEON_DOMAIN_VRAM_GTT = RADEON_DOMAIN_VRAM | RADEON_DOMAIN_GTT,
+	RADEON_DOMAIN_GDS = 8,
+	RADEON_DOMAIN_OA = 16,
 };
 
 enum radeon_bo_flag { /* bitfield */
@@ -58,21 +60,13 @@ enum radeon_bo_flag { /* bitfield */
 	RADEON_FLAG_NO_INTERPROCESS_SHARING = (1 << 6),
 	RADEON_FLAG_READ_ONLY =     (1 << 7),
 	RADEON_FLAG_32BIT =         (1 << 8),
+	RADEON_FLAG_PREFER_LOCAL_BO = (1 << 9),
 };
 
 enum radeon_bo_usage { /* bitfield */
 	RADEON_USAGE_READ = 2,
 	RADEON_USAGE_WRITE = 4,
 	RADEON_USAGE_READWRITE = RADEON_USAGE_READ | RADEON_USAGE_WRITE
-};
-
-enum ring_type {
-	RING_GFX = 0,
-	RING_COMPUTE,
-	RING_DMA,
-	RING_UVD,
-	RING_VCE,
-	RING_LAST,
 };
 
 enum radeon_ctx_priority {
@@ -84,6 +78,9 @@ enum radeon_ctx_priority {
 };
 
 enum radeon_value_id {
+	RADEON_ALLOCATED_VRAM,
+	RADEON_ALLOCATED_VRAM_VIS,
+	RADEON_ALLOCATED_GTT,
 	RADEON_TIMESTAMP,
 	RADEON_NUM_BYTES_MOVED,
 	RADEON_NUM_EVICTIONS,
@@ -147,6 +144,7 @@ struct radeon_bo_metadata {
 		struct {
 			/* surface flags */
 			unsigned swizzle_mode:5;
+			bool scanout;
 		} gfx9;
 	} u;
 
@@ -158,12 +156,12 @@ struct radeon_bo_metadata {
 	uint32_t                metadata[64];
 };
 
-uint32_t syncobj_handle;
 struct radeon_winsys_fence;
 
 struct radeon_winsys_bo {
 	uint64_t va;
 	bool is_local;
+	bool vram_cpu_access;
 };
 struct radv_winsys_sem_counts {
 	uint32_t syncobj_count;
@@ -184,6 +182,27 @@ struct radv_winsys_bo_list {
 	unsigned count;
 };
 
+/* Kernel effectively allows 0-31. This sets some priorities for fixed
+ * functionality buffers */
+enum {
+	RADV_BO_PRIORITY_APPLICATION_MAX = 28,
+
+	/* virtual buffers have 0 priority since the priority is not used. */
+	RADV_BO_PRIORITY_VIRTUAL = 0,
+
+	/* This should be considerably lower than most of the stuff below,
+	 * but how much lower is hard to say since we don't know application
+	 * assignments. Put it pretty high since it is GTT anyway. */
+	RADV_BO_PRIORITY_QUERY_POOL = 29,
+
+	RADV_BO_PRIORITY_DESCRIPTOR = 30,
+	RADV_BO_PRIORITY_UPLOAD_BUFFER = 30,
+	RADV_BO_PRIORITY_FENCE = 30,
+	RADV_BO_PRIORITY_SHADER = 31,
+	RADV_BO_PRIORITY_SCRATCH = 31,
+	RADV_BO_PRIORITY_CS = 31,
+};
+
 struct radeon_winsys {
 	void (*destroy)(struct radeon_winsys *ws);
 
@@ -202,18 +221,21 @@ struct radeon_winsys {
 						  uint64_t size,
 						  unsigned alignment,
 						  enum radeon_bo_domain domain,
-						  enum radeon_bo_flag flags);
+						  enum radeon_bo_flag flags,
+						  unsigned priority);
 
 	void (*buffer_destroy)(struct radeon_winsys_bo *bo);
 	void *(*buffer_map)(struct radeon_winsys_bo *bo);
 
 	struct radeon_winsys_bo *(*buffer_from_ptr)(struct radeon_winsys *ws,
 						    void *pointer,
-						    uint64_t size);
+						    uint64_t size,
+						    unsigned priority);
 
 	struct radeon_winsys_bo *(*buffer_from_fd)(struct radeon_winsys *ws,
 						   int fd,
-						   unsigned *stride, unsigned *offset);
+						   unsigned priority,
+						   uint64_t *alloc_size);
 
 	bool (*buffer_get_fd)(struct radeon_winsys *ws,
 			      struct radeon_winsys_bo *bo,
@@ -272,6 +294,9 @@ struct radeon_winsys {
 
 	struct radeon_winsys_fence *(*create_fence)();
 	void (*destroy_fence)(struct radeon_winsys_fence *fence);
+	void (*reset_fence)(struct radeon_winsys_fence *fence);
+	void (*signal_fence)(struct radeon_winsys_fence *fence);
+	bool (*is_fence_waitable)(struct radeon_winsys_fence *fence);
 	bool (*fence_wait)(struct radeon_winsys *ws,
 			   struct radeon_winsys_fence *fence,
 			   bool absolute,

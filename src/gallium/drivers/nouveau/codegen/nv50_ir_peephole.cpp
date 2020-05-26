@@ -744,6 +744,7 @@ ConstantFolding::expr(Instruction *i,
       // restrictions, so move it into a separate LValue.
       bld.setPosition(i, false);
       i->op = OP_ADD;
+      i->dnz = 0;
       i->setSrc(1, bld.mkMov(bld.getSSA(type), i->getSrc(0), type)->getDef(0));
       i->setSrc(0, i->getSrc(2));
       i->src(0).mod = i->src(2).mod;
@@ -1044,7 +1045,7 @@ ConstantFolding::opnd(Instruction *i, ImmediateValue &imm0, int s)
       break;
    }
    case OP_MUL:
-      if (i->dType == TYPE_F32)
+      if (i->dType == TYPE_F32 && !i->precise)
          tryCollapseChainedMULs(i, s, imm0);
 
       if (i->subOp == NV50_IR_SUBOP_MUL_HIGH) {
@@ -1100,6 +1101,7 @@ ConstantFolding::opnd(Instruction *i, ImmediateValue &imm0, int s)
          if (imm0.isNegative())
             i->src(t).mod = i->src(t).mod ^ Modifier(NV50_IR_MOD_NEG);
          i->op = OP_ADD;
+         i->dnz = 0;
          i->setSrc(s, i->getSrc(t));
          i->src(s).mod = i->src(t).mod;
       } else
@@ -1140,6 +1142,7 @@ ConstantFolding::opnd(Instruction *i, ImmediateValue &imm0, int s)
          i->setSrc(1, i->getSrc(2));
          i->src(1).mod = i->src(2).mod;
          i->setSrc(2, NULL);
+         i->dnz = 0;
          i->op = OP_ADD;
       } else
       if (!isFloatType(i->dType) && !i->subOp && !i->src(t).mod && !i->src(2).mod) {
@@ -1914,7 +1917,7 @@ AlgebraicOpt::handleMINMAX(Instruction *minmax)
    if (minmax->src(0).mod == minmax->src(1).mod) {
       if (minmax->def(0).mayReplace(minmax->src(0))) {
          minmax->def(0).replace(minmax->src(0), false);
-         minmax->bb->remove(minmax);
+         delete_Instruction(prog, minmax);
       } else {
          minmax->op = OP_CVT;
          minmax->setSrc(1, NULL);
@@ -2077,14 +2080,15 @@ void
 AlgebraicOpt::handleCVT_CVT(Instruction *cvt)
 {
    Instruction *insn = cvt->getSrc(0)->getInsn();
-   RoundMode rnd = insn->rnd;
 
-   if (insn->saturate ||
+   if (!insn ||
+       insn->saturate ||
        insn->subOp ||
        insn->dType != insn->sType ||
        insn->dType != cvt->sType)
       return;
 
+   RoundMode rnd = insn->rnd;
    switch (insn->op) {
    case OP_CEIL:
       rnd = ROUND_PI;
@@ -2800,6 +2804,16 @@ MemoryOpt::combineSt(Record *rec, Instruction *st)
    if (prog->getType() == Program::TYPE_COMPUTE && rec->rel[0])
       return false;
 
+   // There's really no great place to put this in a generic manner. Seemingly
+   // wide stores at 0x60 don't work in GS shaders on SM50+. Don't combine
+   // those.
+   if (prog->getTarget()->getChipset() >= NVISA_GM107_CHIPSET &&
+       prog->getType() == Program::TYPE_GEOMETRY &&
+       st->getSrc(0)->reg.file == FILE_SHADER_OUTPUT &&
+       rec->rel[0] == NULL &&
+       MIN2(offRc, offSt) == 0x60)
+      return false;
+
    // remove any existing load/store records for the store being merged into
    // the existing record.
    purgeRecords(st, DATA_FILE_COUNT);
@@ -3510,7 +3524,7 @@ PostRaLoadPropagation::handleMADforNV50(Instruction *i)
          ImmediateValue val;
          // getImmediate() has side-effects on the argument so this *shouldn't*
          // be folded into the assert()
-         MAYBE_UNUSED bool ret = def->src(0).getImmediate(val);
+         ASSERTED bool ret = def->src(0).getImmediate(val);
          assert(ret);
          if (i->getSrc(1)->reg.data.id & 1)
             val.reg.data.u32 >>= 16;

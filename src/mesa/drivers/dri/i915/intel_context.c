@@ -442,13 +442,11 @@ intelInitContext(struct intel_context *intel,
 
    intel->is_945 = IS_945(devID);
 
-   intel->has_swizzling = intel->intelScreen->hw_has_swizzling;
-
    memset(&ctx->TextureFormatSupported,
 	  0, sizeof(ctx->TextureFormatSupported));
 
    driParseConfigFiles(&intel->optionCache, &intelScreen->optionCache,
-                       sPriv->myNum, "i915", NULL);
+                       sPriv->myNum, "i915", NULL, NULL, 0);
    intel->maxBatchSize = 4096;
 
    /* Estimate the size of the mappable aperture into the GTT.  There's an

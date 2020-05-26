@@ -140,8 +140,12 @@ src_register(struct st_translate *t,
          return t->constants[index];
 
    case PROGRAM_INPUT:
-      assert(t->inputMapping[index] < ARRAY_SIZE(t->inputs));
-      return t->inputs[t->inputMapping[index]];
+      if (t->inputMapping[index] < ARRAY_SIZE(t->inputs))
+         return t->inputs[t->inputMapping[index]];
+      else {
+         assert(t->procType == PIPE_SHADER_VERTEX);
+         return ureg_DECL_constant(t->ureg, 0);
+      }
 
    case PROGRAM_OUTPUT:
       assert(t->outputMapping[index] < ARRAY_SIZE(t->outputs));
@@ -734,7 +738,7 @@ emit_wpos(struct st_context *st,
     * u,i -> l,h: (99.0 + 0.5) * -1 + 100 = 0.5
     * u,h -> l,i: (99.5 + 0.5) * -1 + 100 = 0
     */
-   if (program->OriginUpperLeft) {
+   if (program->info.fs.origin_upper_left) {
       /* Fragment shader wants origin in upper-left */
       if (pscreen->get_param(pscreen,
                              PIPE_CAP_TGSI_FS_COORD_ORIGIN_UPPER_LEFT)) {
@@ -764,7 +768,7 @@ emit_wpos(struct st_context *st,
          assert(0);
    }
 
-   if (program->PixelCenterInteger) {
+   if (program->info.fs.pixel_center_integer) {
       /* Fragment shader wants pixel center integer */
       if (pscreen->get_param(pscreen,
                              PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_INTEGER)) {
