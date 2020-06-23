@@ -3,3 +3,5 @@ fix-python-shebang.diff
 path_max.diff
 fix-ppc64el.patch
 src_glx_dri_common.h.diff
+0001-freedreno_resource.c-fd_layout_resource_for_modifier.patch
+0002-freedreno-ir3-Fix-register-allocation-assertion-fail.patch

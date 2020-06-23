@@ -1,3 +1,9 @@
+mesa (20.1.1-1+linaro1) unstable; urgency=medium
+
+  * Add patch to fix freedreno a3xx issue.
+
+ -- Anibal Limon <anibal.limon@linaro.org>  Tue, 23 Jun 2020 11:01:29 -0500
+
 mesa (20.1.1-1) unstable; urgency=medium
 
   * New upstream release.

@@ -1,0 +1,64 @@
+From db453f3f35578dd3ca6628b012650fc51ad1c6fb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?An=C3=ADbal=20Lim=C3=B3n?= <anibal.limon@linaro.org>
+Date: Tue, 23 Jun 2020 10:58:18 -0500
+Subject: [PATCH 1/2] freedreno_resource.c: fd_layout_resource_for_modifier
+ return 0 for invalid
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+See,
+
+https://gitlab.freedesktop.org/mesa/mesa/-/issues/3154
+
+Fixes issues in a3xx,
+
+...
+linaro@linaro-alip:~$ DISPLAY=:0 glxinfo
+name of display: :0
+
+^C
+linaro@linaro-alip:~$ DISPLAY=:0 glxgears
+Running synchronized to the vertical refresh.  The framerate should be
+approximately the same as the monitor refresh rate.
+X Error of failed request:  BadAlloc (insufficient resources for operation)
+  Major opcode of failed request:  149 ()
+  Minor opcode of failed request:  7
+  Serial number of failed request:  44
+  Current serial number in output stream:  45
+linaro@linaro-alip:~$ DISPLAY=:0 glmark2
+=======================================================
+    glmark2 2014.03+git20150611.fa71af2d
+=======================================================
+    OpenGL Information
+    GL_VENDOR:     freedreno
+    GL_RENDERER:   FD307
+    GL_VERSION:    3.1 Mesa 20.1.1
+=======================================================
+X Error of failed request:  BadAlloc (insufficient resources for operation)
+  Major opcode of failed request:  149 ()
+  Minor opcode of failed request:  7
+  Serial number of failed request:  48
+  Current serial number in output stream:  49
+...
+
+Signed-off-by: Aníbal Limón <anibal.limon@linaro.org>
+---
+ src/gallium/drivers/freedreno/freedreno_resource.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/drivers/freedreno/freedreno_resource.c
+index 519cfbc1a5b..ad5011c97b5 100644
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -1244,6 +1244,7 @@ fd_layout_resource_for_modifier(struct fd_resource *rsc, uint64_t modifier)
+ {
+ 	switch (modifier) {
+ 	case DRM_FORMAT_MOD_LINEAR:
++	case DRM_FORMAT_MOD_INVALID:
+ 		return 0;
+ 	default:
+ 		return -1;
+-- 
+2.27.0
+
