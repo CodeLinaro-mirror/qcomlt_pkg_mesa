@@ -2,18 +2,53 @@
 
 set -ex
 
+if [ $DEBIAN_ARCH = arm64 ]; then
+    ARCH_PACKAGES="firmware-qcom-media"
+elif [ $DEBIAN_ARCH = amd64 ]; then
+    # Upstream LLVM package repository
+    apt-get -y install --no-install-recommends gnupg ca-certificates
+    apt-key add /llvm-snapshot.gpg.key
+    echo "deb https://apt.llvm.org/buster/ llvm-toolchain-buster-9 main" >/etc/apt/sources.list.d/llvm9.list
+    apt-get update
+
+    ARCH_PACKAGES="libelf1
+                   libllvm9
+                   libxcb-dri2-0
+                   libxcb-dri3-0
+                   libxcb-present0
+                   libxcb-sync1
+                   libxcb-xfixes0
+                   libxshmfence1
+                   firmware-amd-graphics
+                  "
+fi
+
 apt-get -y install --no-install-recommends \
     ca-certificates \
+    curl \
     initramfs-tools \
     libpng16-16 \
     strace \
     libsensors5 \
     libexpat1 \
-    libdrm2 \
-    libdrm-nouveau2 \
-    firmware-qcom-media \
+    libx11-6 \
+    libx11-xcb1 \
+    $ARCH_PACKAGES \
+    netcat-openbsd \
+    python3 \
+    libpython3.7 \
+    python3-pil \
+    python3-pytest \
+    python3-requests \
+    python3-yaml \
+    sntp \
     wget \
     xz-utils
+
+if [ -n "$INCLUDE_VK_CTS" ]; then
+    apt-get install -y libvulkan1
+fi
+
 passwd root -d
 chsh -s /bin/sh
 
@@ -44,7 +79,8 @@ cp /usr/share/zoneinfo/Etc/UTC /etc/localtime
 
 UNNEEDED_PACKAGES="libfdisk1
                    tzdata
-                   diffutils"
+                   diffutils
+                   gnupg"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -66,6 +102,7 @@ rm -rf /var/log/*
 # Dropping documentation, localization, i18n files, etc
 rm -rf /usr/share/doc/*
 rm -rf /usr/share/locale/*
+rm -rf /usr/share/X11/locale/*
 rm -rf /usr/share/man
 rm -rf /usr/share/i18n/*
 rm -rf /usr/share/info/*
@@ -95,8 +132,8 @@ rm -rf usr/share/misc/usb.ids
 # IMPORTANT: The Debian system is not longer functional at this point,
 # for example, apt and dpkg will stop working
 
-UNNEEDED_PACKAGES="apt libapt-pkg5.0 "\
-"ncurses-bin ncurses-base libncursesw5 libncurses5 "\
+UNNEEDED_PACKAGES="apt libapt-pkg6.0 "\
+"ncurses-bin ncurses-base libncursesw6 libncurses6 "\
 "perl-base "\
 "debconf libdebconfclient0 "\
 "e2fsprogs e2fslibs libfdisk1 "\
@@ -113,6 +150,15 @@ UNNEEDED_PACKAGES="apt libapt-pkg5.0 "\
 "hostname "\
 "adduser "\
 "debian-archive-keyring "\
+"libegl1-mesa-dev "\
+"libegl-mesa0 "\
+"libgl1-mesa-dev "\
+"libgl1-mesa-dri "\
+"libglapi-mesa "\
+"libgles2-mesa-dev "\
+"libglx-mesa0 "\
+"mesa-common-dev "\
+"libz3-4 "\
 
 # Removing unneeded packages
 for PACKAGE in ${UNNEEDED_PACKAGES}
@@ -166,10 +212,10 @@ rm -rf usr/lib/xtables
 rm -rf usr/lib/locale/*
 
 # partition helpers
-rm usr/sbin/*fdisk
+rm -rf usr/sbin/*fdisk
 
 # local compiler
-rm usr/bin/localedef
+rm -rf usr/bin/localedef
 
 # Systemd dns resolver
 find usr etc -name '*systemd-resolve*' -prune -exec rm -r {} \;
@@ -190,16 +236,16 @@ find usr etc -name '*fuse*' -prune -exec rm -r {} \;
 rm -rf usr/lib/lsb
 
 # Only needed when adding libraries
-rm usr/sbin/ldconfig*
+rm -rf usr/sbin/ldconfig*
 
 # Games, unused
 rmdir usr/games
 
 # Remove pam module to authenticate against a DB
 # plus libdb-5.3.so that is only used by this pam module
-rm usr/lib/*/security/pam_userdb.so
-rm usr/lib/*/libdb-5.3.so
+rm -rf usr/lib/*/security/pam_userdb.so
+rm -rf usr/lib/*/libdb-5.3.so
 
 # remove NSS support for nis, nisplus and hesiod
-rm usr/lib/*/libnss_hesiod*
-rm usr/lib/*/libnss_nis*
+rm -rf usr/lib/*/libnss_hesiod*
+rm -rf usr/lib/*/libnss_nis*

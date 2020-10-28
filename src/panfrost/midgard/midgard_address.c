@@ -45,6 +45,20 @@ struct mir_address {
         unsigned bias;
 };
 
+static bool
+mir_args_ssa(nir_ssa_scalar s, unsigned count)
+{
+        nir_alu_instr *alu = nir_instr_as_alu(s.def->parent_instr);
+        assert(count <= nir_op_infos[alu->op].num_inputs);
+
+        for (unsigned i = 0; i < count; ++i) {
+                if (!alu->src[i].src.is_ssa)
+                        return false;
+        }
+
+        return true;
+}
+
 /* Matches a constant in either slot and moves it to the bias */
 
 static void
@@ -67,6 +81,9 @@ static void
 mir_match_iadd(struct mir_address *address, bool first_free)
 {
         if (!address->B.def || !nir_ssa_scalar_is_alu(address->B))
+                return;
+
+        if (!mir_args_ssa(address->B, 2))
                 return;
 
         nir_op op = nir_ssa_scalar_alu_op(address->B);
@@ -96,6 +113,9 @@ mir_match_u2u64(struct mir_address *address)
         if (!address->B.def || !nir_ssa_scalar_is_alu(address->B))
                 return;
 
+        if (!mir_args_ssa(address->B, 1))
+                return;
+
         nir_op op = nir_ssa_scalar_alu_op(address->B);
         if (op != nir_op_u2u64) return;
         nir_ssa_scalar arg = nir_ssa_scalar_chase_alu_src(address->B, 0);
@@ -110,6 +130,9 @@ static void
 mir_match_ishl(struct mir_address *address)
 {
         if (!address->B.def || !nir_ssa_scalar_is_alu(address->B))
+                return;
+
+        if (!mir_args_ssa(address->B, 2))
                 return;
 
         nir_op op = nir_ssa_scalar_alu_op(address->B);
@@ -134,14 +157,14 @@ mir_match_mov(struct mir_address *address)
         if (address->A.def && nir_ssa_scalar_is_alu(address->A)) {
                 nir_op op = nir_ssa_scalar_alu_op(address->A);
 
-                if (op == nir_op_mov)
+                if (op == nir_op_mov && mir_args_ssa(address->A, 1))
                         address->A = nir_ssa_scalar_chase_alu_src(address->A, 0);
         }
 
         if (address->B.def && nir_ssa_scalar_is_alu(address->B)) {
                 nir_op op = nir_ssa_scalar_alu_op(address->B);
 
-                if (op == nir_op_mov)
+                if (op == nir_op_mov && mir_args_ssa(address->B, 1))
                         address->B = nir_ssa_scalar_chase_alu_src(address->B, 0);
         }
 }
@@ -178,6 +201,7 @@ mir_set_offset(compiler_context *ctx, midgard_instruction *ins, nir_src *offset,
         if (!offset->is_ssa) {
                 ins->load_store.arg_1 |= is_shared ? 0x6E : 0x7E;
                 ins->src[2] = nir_src_index(ctx, offset);
+                ins->src_types[2] = nir_type_uint | nir_src_bit_size(*offset);
                 return;
         }
 
@@ -186,12 +210,14 @@ mir_set_offset(compiler_context *ctx, midgard_instruction *ins, nir_src *offset,
         if (match.A.def) {
                 ins->src[1] = nir_ssa_index(match.A.def);
                 ins->swizzle[1][0] = match.A.comp;
+                ins->src_types[1] = nir_type_uint | match.A.def->bit_size;
         } else
                 ins->load_store.arg_1 |= is_shared ? 0x6E : 0x7E;
 
         if (match.B.def) {
                 ins->src[2] = nir_ssa_index(match.B.def);
                 ins->swizzle[2][0] = match.B.comp;
+                ins->src_types[2] = nir_type_uint | match.B.def->bit_size;
         } else
                 ins->load_store.arg_2 = 0x1E;
 

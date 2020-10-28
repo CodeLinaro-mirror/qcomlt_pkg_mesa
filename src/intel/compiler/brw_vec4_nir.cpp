@@ -700,8 +700,10 @@ vec4_visitor::nir_emit_intrinsic(nir_intrinsic_instr *instr)
       break;
    }
 
-   case nir_intrinsic_memory_barrier:
-   case nir_intrinsic_scoped_memory_barrier: {
+   case nir_intrinsic_scoped_barrier:
+      assert(nir_intrinsic_execution_scope(instr) == NIR_SCOPE_NONE);
+      /* Fall through. */
+   case nir_intrinsic_memory_barrier: {
       const vec4_builder bld =
          vec4_builder(this).at_end().annotate(current_annotation, base_ir);
       const dst_reg tmp = bld.vgrf(BRW_REGISTER_TYPE_UD);
@@ -997,7 +999,7 @@ try_immediate_source(const nir_alu_instr *instr, src_reg *op,
 
    case BRW_REGISTER_TYPE_F: {
       int first_comp = -1;
-      float f[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+      float f[NIR_MAX_VEC_COMPONENTS] = { 0.0f };
       bool is_scalar = true;
 
       for (unsigned i = 0; i < NIR_MAX_VEC_COMPONENTS; i++) {
