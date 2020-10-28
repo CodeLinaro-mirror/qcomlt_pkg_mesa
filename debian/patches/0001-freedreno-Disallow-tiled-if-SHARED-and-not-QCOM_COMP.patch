@@ -1,0 +1,42 @@
+From 2784ceacc156af3faab7b378b6443506b04c319c Mon Sep 17 00:00:00 2001
+From: Rob Clark <robdclark@chromium.org>
+Date: Sun, 25 Oct 2020 14:13:38 -0700
+Subject: [PATCH] freedreno: Disallow tiled if SHARED and not QCOM_COMPRESSED
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If the user is not aware of modifiers, and wants to allocate a shared
+resource, we shouldn't leave them with tiled.
+
+Cc: mesa-stable
+Closes: https://gitlab.freedesktop.org/mesa/mesa/-/issues/3678
+Signed-off-by: Rob Clark <robdclark@chromium.org>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/7308>
+(cherry picked from commit 67238f95b52024b4e4b2acd0f750c15317ca3778)
+Signed-off-by: Aníbal Limón <anibal.limon@linaro.org>
+---
+ src/gallium/drivers/freedreno/freedreno_resource.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/drivers/freedreno/freedreno_resource.c
+index 17543842ca0..9c2f900502b 100644
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -933,8 +933,12 @@ fd_resource_create_with_modifiers(struct pipe_screen *pscreen,
+ 	 * should.)
+ 	 */
+ 	bool allow_ubwc = drm_find_modifier(DRM_FORMAT_MOD_INVALID, modifiers, count);
+-	if (tmpl->bind & PIPE_BIND_SHARED)
++	if (tmpl->bind & PIPE_BIND_SHARED) {
+ 		allow_ubwc = drm_find_modifier(DRM_FORMAT_MOD_QCOM_COMPRESSED, modifiers, count);
++		if (!allow_ubwc) {
++			linear = true;
++		}
++	}
+ 
+ 	allow_ubwc &= !(fd_mesa_debug & FD_DBG_NOUBWC);
+ 
+-- 
+2.28.0
+

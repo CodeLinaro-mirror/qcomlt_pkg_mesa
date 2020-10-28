@@ -2,3 +2,4 @@
 fix-python-shebang.diff
 path_max.diff
 src_glx_dri_common.h.diff
+0001-freedreno-Disallow-tiled-if-SHARED-and-not-QCOM_COMP.patch
